@@ -13,16 +13,16 @@ ray.init()
 
 class Timer:
     def __init__(self):
-        self.str = "tiktok"
+        self.start = "tik"
         self.bgt = time.time()
 
-    def tik(self, str="tiktok"):
+    def tik(self, str="tik"):
         self.bgt = time.time()
-        self.str = str
-        print("{} start".format(str))
+        self.start = str
+        print(f"{str} start")
 
-    def tok(self):
-        print("{} done:{}s".format(self.str, round(time.time() - self.bgt, 4)))
+    def tok(self, str="tiktok"):
+        print(f"{str} done : {round(time.time() - self.bgt, 3)}s after {self.start} start")
 
 
 def copy_big_file(in_name, out_name, line_num):
@@ -100,6 +100,9 @@ class Traj2Cell:
                 nearest_cell = c
         return nearest_cell
 
+    def dis_2d(self, cell1, cell2):
+        pass
+
     def draw_cell(self, file_name="cells.png"):
         from PIL import Image
 
@@ -132,25 +135,27 @@ def pool_do(func, arg_list):
 if __name__ == "__main__":
     from args import min_lon, min_lat, max_lon, max_lat
 
+    timer = Timer()
     m = 800
     n = 800
     t2c = Traj2Cell(m, n, min_lon, min_lat, max_lon, max_lat)
     print(t2c.cell_shape)
-    for i in range(1, 31):
+    timer.tik()
+    for i in range(1, 2):
         str_i = str(i).zfill(2)
         print(str_i)
         df = pd.read_csv(f"data/full/gps_201611{str_i}", header=None)
         df.columns = ['name', 'order_id', 'time', 'lon', 'lat']  # lon经度 lat纬度
-        print("read done")
+        timer.tok("read")
         trajs = df[['lon', 'lat']].values.tolist()
-        print("tolist done")
+        timer.tok("tolist")
         t2c.load_trajs(trajs)
-        print("load done")
+        timer.tok("load")
     cell2idx = t2c.build_vocab()
-
+    str_cell2idx = {"{}_{}".format(cell[0], cell[1]): idx for idx, cell in enumerate(list(cell2idx))}
     import json
 
-    js = json.dumps(cell2idx)
+    js = json.dumps(str_cell2idx)
     f = open('jsonFile.json', 'w')
     f.write(js)
     f.close()
