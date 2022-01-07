@@ -141,7 +141,7 @@ if __name__ == "__main__":
     t2c = Traj2Cell(m, n, min_lon, min_lat, max_lon, max_lat)
     print(t2c.cell_shape)
     timer.tik()
-    for i in range(1, 2):
+    for i in range(1, 31):
         str_i = str(i).zfill(2)
         print(str_i)
         df = pd.read_csv(f"data/full/gps_201611{str_i}", header=None)
