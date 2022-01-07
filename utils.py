@@ -146,7 +146,11 @@ if __name__ == "__main__":
         print("tolist done")
         t2c.load_trajs(trajs)
         print("load done")
-    for i in range(1, 1001):
-        print(i)
-        t2c.build_vocab(lower_bound=i)
-        t2c.draw_cell(f'cells_png/cells_lb{i}.png')
+    cell2idx = t2c.build_vocab()
+
+    import json
+
+    js = json.dumps(cell2idx)
+    f = open('jsonFile.json', 'w')
+    f.write(js)
+    f.close()
