@@ -156,6 +156,6 @@ if __name__ == "__main__":
     import json
 
     js = json.dumps(str_cell2idx)
-    f = open('jsonFile.json', 'w')
+    f = open('str_cell2idx.json', 'w')
     f.write(js)
     f.close()
