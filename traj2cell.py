@@ -100,7 +100,7 @@ if __name__ == "__main__":
         timer.tok("read")
         df = df.apply(t2c.convert2d_point, axis=1).squeeze()
         timer.tok("apply")
-        if value_counts:
+        if value_counts is not None:
             value_counts = value_counts.add(df.value_counts(), fill_value=0)
         else:
             value_counts = df.value_counts()
