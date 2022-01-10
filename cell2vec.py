@@ -31,11 +31,12 @@ def make_data(skip_grams, vocab_size):
 if __name__ == '__main__':
     timer = utils.Timer()
     timer.tik("read")
-    with open('data/str_cell2idx.json') as f:
+    with open('data/str_cell2idx_400.json') as f:
         str_cell2idx = json.load(f)
         f.close()
     cell2idx = {eval(c): str_cell2idx[c] for c in list(str_cell2idx)}
     timer.tok()
+    print(len(cell2idx))
 
     t2c = Traj2Cell(args.row_num, args.column_num, args.min_lon, args.min_lat, args.max_lon, args.max_lat)
     skip_grams = []

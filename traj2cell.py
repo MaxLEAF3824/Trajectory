@@ -1,16 +1,9 @@
 import utils
 from geopy.distance import geodesic as dis
 import numpy as np
-# import pandas as pd
-
-import modin.pandas as pd
-import ray
-
-ray.init()
 
 
 class Traj2Cell:
-
     def __init__(self, m, n, min_lon, min_lat, max_lon, max_lat):
         self.cell2idx = {}
         self.row_num = m  # 行数
@@ -42,7 +35,8 @@ class Traj2Cell:
         if not self.cell2idx:
             print("vocab is not built.")
             return []
-        for cell in [self.convert2d_point(p) for p in traj]:
+        for p in traj:
+            cell = self.convert2d_point(p)
             if self.cell2idx.get(cell):
                 traj_1d.append(self.cell2idx[cell])
             else:
@@ -85,6 +79,12 @@ class Traj2Cell:
 
 
 if __name__ == "__main__":
+    import pandas as pd
+    import modin.pandas as pd
+    import ray
+
+    ray.init()
+
     from args import row_num, column_num, min_lon, min_lat, max_lon, max_lat
 
     timer = utils.Timer()
@@ -115,4 +115,3 @@ if __name__ == "__main__":
     with open(f'data/str_cell2idx_{row_num}.json', 'w') as f:
         f.write(js)
         f.close()
-
