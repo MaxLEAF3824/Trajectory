@@ -34,7 +34,7 @@ if __name__ == '__main__':
     with open('data/str_cell2idx.json') as f:
         str_cell2idx = json.load(f)
         f.close()
-    cell2idx = {tuple([int(i) for i in c.split("_")]): str_cell2idx[c] for c in list(str_cell2idx)}
+    cell2idx = {eval(c): str_cell2idx[c] for c in list(str_cell2idx)}
     timer.tok()
 
     t2c = Traj2Cell(args.row_num, args.column_num, args.min_lon, args.min_lat, args.max_lon, args.max_lat)

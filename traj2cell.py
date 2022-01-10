@@ -2,12 +2,14 @@ import utils
 from geopy.distance import geodesic as dis
 from math import ceil
 import numpy as np
-import pandas as pd
+# import pandas as pd
 
 
-# import modin.pandas as pd
-# import ray
-# ray.init()
+import modin.pandas as pd
+import ray
+
+ray.init()
+
 
 class Traj2Cell:
 
@@ -39,13 +41,12 @@ class Traj2Cell:
             else:
                 self.cell_count[cell] += 1
 
-    def build_vocab(self, lower_bound=0):
-        cell2idx = {}
+    def build_vocab(self, lower_bound=1):
+        self.cell2idx.clear()
         for idx, cell in enumerate(self.cell_count):
             if self.cell_count[cell] >= lower_bound:
-                cell2idx[cell] = idx
-        self.cell2idx = cell2idx
-        return cell2idx
+                self.cell2idx[cell] = idx
+        return self.cell2idx
 
     def convert1d(self, traj):
         traj_1d = []
@@ -99,11 +100,11 @@ if __name__ == "__main__":
     from args import min_lon, min_lat, max_lon, max_lat
 
     timer = utils.Timer()
-    m = 800
-    n = 800
+    m = 400
+    n = 400
     t2c = Traj2Cell(m, n, min_lon, min_lat, max_lon, max_lat)
     print(t2c.cell_shape)
-    timer.tik()
+    timer.tik("")
     for i in range(1, 31):
         str_i = str(i).zfill(2)
         print(str_i)
@@ -115,10 +116,14 @@ if __name__ == "__main__":
         t2c.load_trajs(trajs)
         timer.tok("load")
     cell2idx = t2c.build_vocab()
-    str_cell2idx = {"{}_{}".format(cell[0], cell[1]): idx for idx, cell in enumerate(list(cell2idx))}
+    str_cell2idx = {"({},{})".format(cell[0], cell[1]): idx for idx, cell in enumerate(list(cell2idx))}
     import json
 
     js = json.dumps(str_cell2idx)
-    f = open('str_cell2idx.json', 'w')
-    f.write(js)
-    f.close()
+    with open('data/str_cell2idx.json', 'w') as f:
+        f.write(js)
+        f.close()
+
+    for i in range(1, 1001):
+        cell2idx = t2c.build_vocab(i)
+        t2c.draw_cell(f"cells_lb{i}")
