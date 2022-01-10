@@ -97,12 +97,10 @@ class Traj2Cell:
 
 
 if __name__ == "__main__":
-    from args import min_lon, min_lat, max_lon, max_lat
+    from args import row_num, column_num, min_lon, min_lat, max_lon, max_lat
 
     timer = utils.Timer()
-    m = 400
-    n = 400
-    t2c = Traj2Cell(m, n, min_lon, min_lat, max_lon, max_lat)
+    t2c = Traj2Cell(row_num, column_num, min_lon, min_lat, max_lon, max_lat)
     print(t2c.cell_shape)
     timer.tik("")
     for i in range(1, 31):
@@ -120,10 +118,10 @@ if __name__ == "__main__":
     import json
 
     js = json.dumps(str_cell2idx)
-    with open('data/str_cell2idx.json', 'w') as f:
+    with open(f'data/str_cell2idx_{row_num}.json', 'w') as f:
         f.write(js)
         f.close()
 
     for i in range(1, 1001):
         cell2idx = t2c.build_vocab(i)
-        t2c.draw_cell(f"cells_png_400/cells_lb{i}")
+        t2c.draw_cell(f"cells_png_400/cells_lb{i}.png")
