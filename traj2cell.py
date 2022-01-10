@@ -116,8 +116,3 @@ if __name__ == "__main__":
         f.write(js)
         f.close()
 
-    for i in range(1, 1001):
-        pic_name = f"cells_png_400/cells_lb{i}.png"
-        cell2idx = t2c.build_vocab(value_counts, i)
-        t2c.draw_cell(value_counts, pic_name)
-        print(pic_name)
