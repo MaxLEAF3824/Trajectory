@@ -25,7 +25,7 @@ def make_data(skip_grams, vocab_size):
         one_hot[ce] = 1
         input_data.append(one_hot)
         output_data.append(co)
-    return input_data, output_data
+    return np.array(input_data), np.array(output_data)
 
 
 if __name__ == '__main__':
@@ -34,7 +34,7 @@ if __name__ == '__main__':
     with open('data/str_cell2idx.json') as f:
         str_cell2idx = json.load(f)
         f.close()
-    cell2idx = {tuple([int(i) for i in c.split("_")]): str_cell2idx[c] for c in list(str_cell2idx)[:1000]}
+    cell2idx = {tuple([int(i) for i in c.split("_")]): str_cell2idx[c] for c in list(str_cell2idx)}
     timer.tok()
 
     t2c = Traj2Cell(args.row_num, args.column_num, args.min_lon, args.min_lat, args.max_lon, args.max_lat)
