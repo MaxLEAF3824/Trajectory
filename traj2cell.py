@@ -126,4 +126,4 @@ if __name__ == "__main__":
 
     for i in range(1, 1001):
         cell2idx = t2c.build_vocab(i)
-        t2c.draw_cell(f"cells_lb{i}")
+        t2c.draw_cell(f"cells_png_400/cells_lb{i}")
