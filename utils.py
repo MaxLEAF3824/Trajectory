@@ -39,4 +39,3 @@ class Timer:
         if not str:
             str = self.start
         print(f"{str} done : {round(time.time() - self.bgt, 3)}s after {self.start} start")
-

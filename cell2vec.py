@@ -1,4 +1,7 @@
 import json
+
+from torch.utils.data.dataset import T_co
+
 import args
 import utils
 from traj2cell import Traj2Cell
@@ -12,48 +15,62 @@ import torch.optim as optimizer
 import torch.utils.data as Data
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-dtype = torch.FloatTensor
 window_size = 5
-batch_size = 256
+batch_size = 8
+negative_sampling_num = 100
 
 
-def make_data(skip_grams, vocab_size):
-    input_data = []
-    output_data = []
-    for ce, co in skip_grams:
-        one_hot = np.zeros(vocab_size)
-        one_hot[ce] = 1
-        input_data.append(one_hot)
-        output_data.append(co)
-    return np.array(input_data), np.array(output_data)
+class CellEmbeddingDataset(Data.Dataset):
+    def __init__(self, cell2idx: dict, window_size, negative_sampling_num):
+        self.window_size = window_size
+        self.negative_sampling_num = negative_sampling_num
+        self.cell2idx = cell2idx
+        self.idx2cell = {cell2idx[c]: c for c in cell2idx}
+        sorted_cells = []
+        self.cells_arrange = torch.arange(len(cell2idx)).unsqueeze(1)
+        for i in range(len(cell2idx)):
+            sorted_cells.append(self.idx2cell[i])
+        self.positive = []
+        tree = KDTree(sorted_cells)
+        distance, index = tree.query(sorted_cells, k=window_size + 1)
+        for i in range(index.shape[0]):
+            self.positive.append(index[i, 1:])
+        self.positive = torch.tensor(np.array(self.positive))
+
+    def __len__(self):
+        return len(self.cell2idx)
+
+    def __getitem__(self, idx):
+        ones = torch.ones(len(self.cell2idx))
+        ones[idx] = 0
+        for i in self.positive[idx]:
+            ones[i] = 0
+        negative = torch.multinomial(ones, self.negative_sampling_num * self.window_size, replacement=True)
+        return self.cells_arrange[idx], self.positive[idx], negative
+
+
+class Cell2Vec(nn.Module):
+    def __init__(self, vocab_size, embedding_size):
+        self.vocab_size = vocab_size
+        self.embedding_size = embedding_size
+        self.in_embedding = nn.Embedding(vocab_size, embedding_size)
+        self.out_embedding = nn.Embedding(vocab_size, embedding_size)
 
 
 if __name__ == '__main__':
     timer = utils.Timer()
     timer.tik("read")
-    with open('data/str_cell2idx_400.json') as f:
+    with open('data/str_cell2idx_800.json') as f:
         str_cell2idx = json.load(f)
         f.close()
     cell2idx = {eval(c): str_cell2idx[c] for c in list(str_cell2idx)}
     timer.tok()
-    print(len(cell2idx))
 
-    t2c = Traj2Cell(args.row_num, args.column_num, args.min_lon, args.min_lat, args.max_lon, args.max_lat)
-    skip_grams = []
-
-    timer.tik("skip_gram")
-    tree = KDTree(list(cell2idx), leaf_size=2)
-    _, index = tree.query(list(cell2idx), k=window_size + 1)
-    skip_grams.extend([[index[i, 0], index[i, j]] for i in range(index.shape[0]) for j in range(1, index.shape[1])])
+    timer.tik("build dataset")
+    dataset = CellEmbeddingDataset(cell2idx, window_size, negative_sampling_num)
+    dataloader = Data.DataLoader(dataset=dataset, batch_size=batch_size, shuffle=True)
     timer.tok()
 
-    timer.tik("make data")
-    input_data, output_data = make_data(skip_grams, len(cell2idx))
-    timer.tok()
-
-    timer.tik("to tensor")
-    input_data, output_data = torch.tensor(input_data), torch.LongTensor(output_data)
-    timer.tok()
-
-    dataset = Data.TensorDataset(input_data, output_data)
-    loader = Data.DataLoader(dataset, batch_size, shuffle=True)
+    for a, b, c in dataloader:
+        print(a.shape, b.shape, c.shape)
+        break
