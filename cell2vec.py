@@ -63,8 +63,8 @@ class Cell2Vec(nn.Module):
 
 if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    window_size = 5
-    batch_size = 128
+    window_size = 20
+    batch_size = 512
     embedding_size = 128
     epoch_num = 20
     neg_rate = 100  # negative sampling rate
