@@ -1,33 +1,21 @@
 import json
-
-from torch.utils.data.dataset import T_co
-
 import args
 import utils
-from traj2cell import Traj2Cell
-from joblib import Parallel, delayed
-from copy import copy
+import torch.nn.functional as F
 import torch
 import numpy as np
 from sklearn.neighbors import KDTree
 import torch.nn as nn
-import torch.optim as optimizer
-import torch.utils.data as Data
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-window_size = 5
-batch_size = 8
-negative_sampling_num = 100
 
 
-class CellEmbeddingDataset(Data.Dataset):
-    def __init__(self, cell2idx: dict, window_size, negative_sampling_num):
+class CellEmbeddingDataset(torch.utils.data.Dataset):
+    def __init__(self, cell2idx: dict, window_size, neg_rate):
         self.window_size = window_size
-        self.negative_sampling_num = negative_sampling_num
+        self.neg_rate = neg_rate
         self.cell2idx = cell2idx
         self.idx2cell = {cell2idx[c]: c for c in cell2idx}
         sorted_cells = []
-        self.cells_arrange = torch.arange(len(cell2idx)).unsqueeze(1)
+        self.cells_arrange = torch.arange(len(cell2idx))
         for i in range(len(cell2idx)):
             sorted_cells.append(self.idx2cell[i])
         self.positive = []
@@ -45,19 +33,43 @@ class CellEmbeddingDataset(Data.Dataset):
         ones[idx] = 0
         for i in self.positive[idx]:
             ones[i] = 0
-        negative = torch.multinomial(ones, self.negative_sampling_num * self.window_size, replacement=True)
+        negative = torch.multinomial(ones, self.neg_rate * self.window_size, replacement=True)
         return self.cells_arrange[idx], self.positive[idx], negative
 
 
 class Cell2Vec(nn.Module):
-    def __init__(self, vocab_size, embedding_size):
+    def  __init__(self, vocab_size, embedding_size):
+        super(Cell2Vec, self).__init__()
         self.vocab_size = vocab_size
         self.embedding_size = embedding_size
         self.in_embedding = nn.Embedding(vocab_size, embedding_size)
         self.out_embedding = nn.Embedding(vocab_size, embedding_size)
 
+    def forward(self, center: torch.Tensor, positive: torch.Tensor, negative: torch.Tensor):
+        c_vec = self.in_embedding(center).unsqueeze(2)  # [batch, embedding_size, 1]
+        p_vec = self.out_embedding(positive)  # [batch, window_size, embedding_size]
+        n_vec = self.out_embedding(negative)  # [batch, window_size * neg_rate, embedding_size]
+
+        p_dot = torch.bmm(p_vec, c_vec)
+        n_dot = torch.bmm(n_vec, -c_vec)
+        log_pos = F.logsigmoid(p_dot).sum(1)
+        log_neg = F.logsigmoid(n_dot).sum(1)
+        loss = -(log_pos + log_neg)
+        return loss
+
+    def input_embedding(self):  # 取出self.in_embed数据参数
+        return self.in_embed.weight.data.cpu().numpy()
+
 
 if __name__ == '__main__':
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    window_size = 5
+    batch_size = 128
+    embedding_size = 128
+    epoch_num = 20
+    neg_rate = 100  # negative sampling rate
+    learning_rate = 1e-3
+
     timer = utils.Timer()
     timer.tik("read")
     with open('data/str_cell2idx_800.json') as f:
@@ -67,10 +79,23 @@ if __name__ == '__main__':
     timer.tok()
 
     timer.tik("build dataset")
-    dataset = CellEmbeddingDataset(cell2idx, window_size, negative_sampling_num)
-    dataloader = Data.DataLoader(dataset=dataset, batch_size=batch_size, shuffle=True)
+    dataset = CellEmbeddingDataset(cell2idx, window_size, neg_rate)
+    dataloader = torch.utils.data.DataLoader(dataset=dataset, batch_size=batch_size, shuffle=True)
     timer.tok()
 
-    for a, b, c in dataloader:
-        print(a.shape, b.shape, c.shape)
-        break
+    model = Cell2Vec(len(cell2idx), embedding_size).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    model.train()
+
+    for epoch in range(epoch_num):
+        for i, (center, positive, negative) in enumerate(dataloader):
+            optimizer.zero_grad()
+            loss = model(center.to(device), positive.to(device), negative.to(device)).mean()
+            loss.backward()
+            optimizer.step()
+            if i % 100 == 0:
+                print(f"epoch:{epoch}, iter:{i}/{len(cell2idx) / batch_size} loss:{loss}")
+
+    embedding_weights = model.input_embedding()
+    np.save('embedding-{}'.format(embedding_size), embedding_weights)
+    torch.save(model.state_dict(), 'embedding-{}.th'.format(embedding_size))

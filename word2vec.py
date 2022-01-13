@@ -27,7 +27,7 @@ if USE_CUDA:
 # 设定hyper parameters
 C = 3  # context window, namely nearby words threshold
 K = 100  # number of negative samples, 每出现一个正确的词就要出现100个错误的词
-NUM_EPOCHS = 1
+NUM_EPOCHS = 10
 MAX_VOCAB_SIZE = 30000
 BATCH_SIZE = 8
 LEARNING_RATE = 0.2
@@ -202,17 +202,17 @@ for e in range(NUM_EPOCHS):
                     f_out.write('Epoch: {}, Iteration: {}, Loss: {} + \n'.format(e, i, loss.item()))
                     print(f'Epoch: {e}, Iteration: {i}, Loss: {loss.item()}')
 
-            if i % 2000 == 0:
-                embedding_weights = model.input_embedding()
-                sim_simlex = evaluate(filename='simlex-999.txt', embedding_weights=embedding_weights)
-                sim_men = evaluate(filename='men.txt', embedding_weights=embedding_weights)
-                sim_353 = evaluate(filename='wordsim353.csv', embedding_weights=embedding_weights)
-                with open(file=LOG_FILE, mode='a') as f_out:
-                    print(
-                        f'Epoch: {e}, Iteration: {i}, sim_simlex: {sim_simlex}, sim_men: {sim_men}, sim_353: {sim_353}, nearest to monster: {find_nearest(word="monster")} + \n')
-                    f_out.write(
-                        'Epoch: {}, Iteration: {}, sim_simlex: {}, sim_men: {}, sim_353: {}, nearest to monster: {} + \n'.format(
-                            e, i, sim_simlex, sim_men, sim_353, find_nearest(word="monster")))
+            # if i % 2000 == 0:
+            #     embedding_weights = model.input_embedding()
+            #     sim_simlex = evaluate(filename='simlex-999.txt', embedding_weights=embedding_weights)
+            #     sim_men = evaluate(filename='men.txt', embedding_weights=embedding_weights)
+            #     sim_353 = evaluate(filename='wordsim353.csv', embedding_weights=embedding_weights)
+            #     with open(file=LOG_FILE, mode='a') as f_out:
+            #         print(
+            #             f'Epoch: {e}, Iteration: {i}, sim_simlex: {sim_simlex}, sim_men: {sim_men}, sim_353: {sim_353}, nearest to monster: {find_nearest(word="monster")} + \n')
+            #         f_out.write(
+            #             'Epoch: {}, Iteration: {}, sim_simlex: {}, sim_men: {}, sim_353: {}, nearest to monster: {} + \n'.format(
+            #                 e, i, sim_simlex, sim_men, sim_353, find_nearest(word="monster")))
 
     embedding_weights = model.input_embedding()
     np.save('embedding-{}'.format(EMBEDDING_SIZE), embedding_weights)
