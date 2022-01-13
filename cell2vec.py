@@ -67,11 +67,11 @@ def train_cell2vec(file="data/str_cell2idx_800.json", window_size=20, batch_size
                    learning_rate=1e-3):
     sys.stdout = utils.Logger('log/train_cell2vec.log')
     timer = utils.Timer()
-    print(f'start time : {timer.now()}\nwindow_size : {window_size}\nbatch_size : {batch_size}'
-          f'\nembedding_size : {embedding_size}\nepoch_num : {epoch_num}\nlearning_rate : {learning_rate}\n\n')
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     neg_rate = 100  # negative sampling rate
-
+    print(f'start time : {timer.now()}\nwindow_size : {window_size}\nbatch_size : {batch_size}'
+          f'\nembedding_size : {embedding_size}\nepoch_num : {epoch_num}\nlearning_rate : {learning_rate}'
+          f'\nnegative sampling rate : {neg_rate}\ndevice : {device}')
     timer.tik("read")
     with open(file) as f:
         str_cell2idx = json.load(f)
