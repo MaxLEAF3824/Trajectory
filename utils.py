@@ -1,6 +1,6 @@
 import time
-from math import sqrt
-import numpy as np
+import sys
+import os
 
 
 def copy_big_file(in_name, out_name, line_num):
@@ -38,4 +38,20 @@ class Timer:
     def tok(self, str=""):
         if not str:
             str = self.start
-        print(f"{str} done : {round(time.time() - self.bgt, 3)}s after {self.start} start")
+        print(f"{str} done, {round(time.time() - self.bgt, 3)}s after {self.start} start")
+
+    def now(self):
+        return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+
+
+class Logger(object):
+    def __init__(self, filename="Default.log"):
+        self.terminal = sys.stdout
+        self.log = open(filename, "a")
+
+    def write(self, message):
+        self.terminal.write(message)
+        self.log.write(message)
+
+    def flush(self):
+        pass

@@ -1,11 +1,13 @@
 import json
-import args
+import time
+
 import utils
 import torch.nn.functional as F
 import torch
 import numpy as np
 from sklearn.neighbors import KDTree
 import torch.nn as nn
+import sys
 
 
 class CellEmbeddingDataset(torch.utils.data.Dataset):
@@ -38,7 +40,7 @@ class CellEmbeddingDataset(torch.utils.data.Dataset):
 
 
 class Cell2Vec(nn.Module):
-    def  __init__(self, vocab_size, embedding_size):
+    def __init__(self, vocab_size, embedding_size):
         super(Cell2Vec, self).__init__()
         self.vocab_size = vocab_size
         self.embedding_size = embedding_size
@@ -61,18 +63,17 @@ class Cell2Vec(nn.Module):
         return self.in_embed.weight.data.cpu().numpy()
 
 
-if __name__ == '__main__':
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    window_size = 20
-    batch_size = 512
-    embedding_size = 128
-    epoch_num = 20
-    neg_rate = 100  # negative sampling rate
-    learning_rate = 1e-3
-
+def train_cell2vec(file="data/str_cell2idx_800.json", window_size=20, batch_size=512, embedding_size=128, epoch_num=100,
+                   learning_rate=1e-3):
+    sys.stdout = utils.Logger('log/train_cell2vec.log')
     timer = utils.Timer()
+    print(f'start time : {timer.now()}\nwindow_size : {window_size}\nbatch_size : {batch_size}'
+          f'\nembedding_size : {embedding_size}\nepoch_num : {epoch_num}\nlearning_rate : {learning_rate}\n\n')
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    neg_rate = 100  # negative sampling rate
+
     timer.tik("read")
-    with open('data/str_cell2idx_800.json') as f:
+    with open(file) as f:
         str_cell2idx = json.load(f)
         f.close()
     cell2idx = {eval(c): str_cell2idx[c] for c in list(str_cell2idx)}
@@ -87,6 +88,7 @@ if __name__ == '__main__':
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     model.train()
 
+    timer.tik("training")
     for epoch in range(epoch_num):
         for i, (center, positive, negative) in enumerate(dataloader):
             optimizer.zero_grad()
@@ -94,8 +96,12 @@ if __name__ == '__main__':
             loss.backward()
             optimizer.step()
             if i % 100 == 0:
-                print(f"epoch:{epoch}, iter:{i}/{len(cell2idx) / batch_size} loss:{loss}")
+                timer.tok(f"epoch:{epoch}, iter:{i}/{len(cell2idx) // batch_size} loss:{loss}")
 
     embedding_weights = model.input_embedding()
-    np.save('embedding-{}'.format(embedding_size), embedding_weights)
-    torch.save(model.state_dict(), 'embedding-{}.th'.format(embedding_size))
+    np.save('result/embedding-{}'.format(embedding_size), embedding_weights)
+    torch.save(model.state_dict(), 'result/embedding-{}.th'.format(embedding_size))
+
+
+if __name__ == '__main__':
+    train_cell2vec()
