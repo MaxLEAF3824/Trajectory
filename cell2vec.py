@@ -150,13 +150,11 @@ def train_cell2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
                 env.line(
                     X=np.array([(epoch - epoch_start) * iter_num + i]),
                     Y=np.array([float(loss)]),
-                    name='loss',
                     win=pane1,  # win参数确认使用哪一个pane
                     update='append')
                 env.line(
                     X=np.array([(epoch - epoch_start) * iter_num + i]),
                     Y=np.array([acc_list]),
-                    name='accuracy',
                     win=pane2,
                     update='append')
             if i % (iter_num // 4 + 1) == 0:
