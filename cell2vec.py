@@ -156,7 +156,7 @@ def train_cell2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
                     win=pane1,
                     update='append')
             if i % (iter_num // 4 + 1) == 0:
-                timer.tok(f"epoch:{epoch}, iter:{i}/{iter_num} loss:{loss}")
+                timer.tok(f"epoch:{epoch} iter:{i}/{iter_num} loss:{round(float(loss), 3)} acc:{round(acc, 3)}")
                 if i == 0 and epoch == epoch_start:
                     continue
                 if np.mean(loss_list) < cp_save_rate * best_loss:
