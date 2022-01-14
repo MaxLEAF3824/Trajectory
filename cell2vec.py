@@ -66,7 +66,7 @@ class Cell2Vec(nn.Module):
 
 
 def train_cell2vec(file, window_size, embedding_size, batch_size, epoch_num, learning_rate, checkpoint, pretrained,
-                   visdom):
+                   visdom_port):
     # init
     timer = utils.Timer()
     sys.stdout = utils.Logger(f'log/train_cell2vec_{timer.now()}.log')
@@ -102,13 +102,17 @@ def train_cell2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
     last_save_epoch = 0
 
     # start visdom
-    if visdom:
+    if visdom_port != 0:
         from visdom import Visdom
-        env = Visdom()
+        env = Visdom(port=visdom_port)
         pane1 = env.line(
             X=np.array([0]),
             Y=np.array([0]),
             opts=dict(title='loss'))
+        pane2 = env.line(
+            X=np.array([0]),
+            Y=np.array([0]),
+            opts=dict(title='accuracy'))
 
     # load checkpoint / pretrained_state_dict
     if checkpoint is not None:
@@ -142,7 +146,7 @@ def train_cell2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
             loss_list.append(float(loss))
             acc = evaluate_cell2vec(model.input_embedding(), dataset)
             acc_list.append(acc)
-            if visdom:
+            if visdom_port != 0:
                 env.line(
                     X=np.array([(epoch - epoch_start) * iter_num + i]),
                     Y=np.array([float(loss)]),
@@ -153,7 +157,7 @@ def train_cell2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
                     X=np.array([(epoch - epoch_start) * iter_num + i]),
                     Y=np.array([acc_list]),
                     name='accuracy',
-                    win=pane1,
+                    win=pane2,
                     update='append')
             if i % (iter_num // 4 + 1) == 0:
                 timer.tok(f"epoch:{epoch} iter:{i}/{iter_num} loss:{round(float(loss), 3)} acc:{round(acc, 3)}")

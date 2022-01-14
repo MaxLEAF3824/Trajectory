@@ -19,11 +19,12 @@ parser.add_argument('--checkpoint', '-cp', type=str, default=None)
 
 parser.add_argument('--pretrained', '-pre', type=str, default=None)
 
-parser.add_argument('--visdom', '-vis', type=int, default=0)
+parser.add_argument('--visdom_port', '-vp', type=int, default=0)
+
 
 args = parser.parse_args()
 
 print(args)
 
 train_cell2vec(args.dict_file, args.window_size, args.embedding_size, args.batch_size, args.epoch_num,
-               args.learning_rate, args.checkpoint, args.pretrained, args.visdom)
+               args.learning_rate, args.checkpoint, args.pretrained, args.visdom_port)
