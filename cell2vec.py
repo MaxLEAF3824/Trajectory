@@ -121,7 +121,8 @@ def train_cell2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
         model.load_state_dict(torch.load(pretrained))
 
     # start training
-    print(f'training start time : {timer.now()}\n'
+    print(f'\n-------------training config-------------\n'
+          f'start time : {timer.now()}\n'
           f'window_size : {dataset.window_size}\n'
           f'batch_size : {dataloader.batch_size}\n'
           f'embedding_size : {model.embedding_size}\n'
