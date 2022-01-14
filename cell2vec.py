@@ -149,13 +149,13 @@ def train_cell2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
                 np.save(f'model/cell_embedding_{embedding_size}_{round(acc, 2)}', model.input_embedding())
             if visdom:
                 env.line(
-                    X=np.array([epoch * iter_num + i]),
+                    X=np.array([(epoch - epoch_start) * iter_num + i]),
                     Y=np.array([float(loss)]),
                     name='loss',
                     win=pane1,  # win参数确认使用哪一个pane
                     update='append')
                 env.line(
-                    X=np.array([epoch * iter_num + i]),
+                    X=np.array([(epoch - epoch_start) * iter_num + i]),
                     Y=np.array([acc]),
                     name='accuracy',
                     win=pane1,
@@ -188,4 +188,3 @@ if __name__ == "__main__":
     t.tik()
     accuracy = evaluate_cell2vec(embedding_weights, dataset, test_num=5)
     t.tok(accuracy)
-
