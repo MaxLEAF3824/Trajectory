@@ -122,12 +122,12 @@ def train_cell2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
 
     # start training
     print(f'training start time : {timer.now()}\n'
-              f'window_size : {dataset.window_size}\n'
-              f'batch_size : {dataloader.batch_size}\n'
-              f'embedding_size : {model.embedding_size}\n'
-              f'epoch_num : {epoch_num}\n'
-              f'learning_rate : {learning_rate}\n'
-              f'device : {device}\n')
+          f'window_size : {dataset.window_size}\n'
+          f'batch_size : {dataloader.batch_size}\n'
+          f'embedding_size : {model.embedding_size}\n'
+          f'epoch_num : {epoch_num}\n'
+          f'learning_rate : {learning_rate}\n'
+          f'device : {device}\n')
     timer.tik("training")
     for epoch in range(epoch_start, epoch_num):
         for i, (center, positive, negative) in enumerate(dataloader):
@@ -173,7 +173,7 @@ def evaluate_cell2vec(embedding_weights, dataset, test_num=10):
 
     predict = list(nearest_index[:, 1:dataset.window_size + 1])
     truth = [dataset[idx][1].numpy() for idx in samples_index]
-    accuracy = np.mean([len(np.intersect1d(predict[i], truth[i])) for i in range(test_num)]) / dataset.window_size * 100
+    accuracy = np.mean([len(np.intersect1d(predict[i], truth[i])) for i in range(test_num)]) / dataset.window_size
     return accuracy
 
 
