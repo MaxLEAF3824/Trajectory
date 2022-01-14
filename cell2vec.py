@@ -99,6 +99,7 @@ def train_cell2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
     loss_list = []
     acc_list = []
     best_accuracy = 0
+    last_save_epoch = 0
 
     # start visdom
     if visdom:
@@ -118,6 +119,7 @@ def train_cell2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
             optimizer.load_state_dict(checkpoint['optimizer'])
         if checkpoint.get('epoch'):
             epoch_start = checkpoint['epoch'] + 1
+            last_save_epoch = epoch_start
     elif pretrained is not None:
         model.load_state_dict(torch.load(pretrained))
 
@@ -137,19 +139,7 @@ def train_cell2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
             loss = model(center.to(device), positive.to(device), negative.to(device)).mean()
             loss.backward()
             optimizer.step()
-
             loss_list.append(float(loss))
-            if i % (iter_num // 4 + 1) == 0:
-                timer.tok(f"epoch:{epoch}, iter:{i}/{iter_num} loss:{loss}")
-                if np.mean(loss_list) < cp_save_rate * best_loss and not (i == 0 and epoch == epoch_start):
-                    best_loss = np.mean(loss_list)
-                    loss_list.clear()
-                    checkpoint = {'model': model.state_dict(), 'optimizer': optimizer.state_dict(), 'epoch': epoch}
-                    torch.save(checkpoint, f'model/checkpoint_{embedding_size}_{round(float(loss), 3)}.pth')
-                if np.mean(acc_list) * np_save_rate > best_accuracy:
-                    avg_acc = float(np.mean(acc_list))
-                    best_accuracy = avg_acc
-                    np.save(f'model/cell_embedding_{embedding_size}_{round(avg_acc, 2)}', model.input_embedding())
             acc = evaluate_cell2vec(model.input_embedding(), dataset)
             acc_list.append(acc)
             if visdom:
@@ -165,6 +155,23 @@ def train_cell2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
                     name='accuracy',
                     win=pane1,
                     update='append')
+            if i % (iter_num // 4 + 1) == 0:
+                timer.tok(f"epoch:{epoch}, iter:{i}/{iter_num} loss:{loss}")
+                if i == 0 and epoch == epoch_start:
+                    continue
+                if np.mean(loss_list) < cp_save_rate * best_loss:
+                    best_loss = np.mean(loss_list)
+                    loss_list.clear()
+                    checkpoint = {'model': model.state_dict(), 'optimizer': optimizer.state_dict(), 'epoch': epoch}
+                    torch.save(checkpoint, f'model/checkpoint_{embedding_size}_{epoch}_{i}_{round(float(loss), 3)}.pth')
+                elif epoch - last_save_epoch > 5:
+                    last_save_epoch = epoch
+                    checkpoint = {'model': model.state_dict(), 'optimizer': optimizer.state_dict(), 'epoch': epoch}
+                    torch.save(checkpoint, f'model/checkpoint_{embedding_size}_{epoch}_{i}_{round(float(loss), 3)}.pth')
+                if np.mean(acc_list) * np_save_rate > best_accuracy:
+                    avg_acc = float(np.mean(acc_list))
+                    best_accuracy = avg_acc
+                    np.save(f'model/cell_embedding_{embedding_size}_{round(avg_acc, 2)}', model.input_embedding())
 
 
 def evaluate_cell2vec(embedding_weights, dataset, test_num=10):
