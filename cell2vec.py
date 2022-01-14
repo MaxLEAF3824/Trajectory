@@ -97,6 +97,7 @@ def train_cell2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
     epoch_start = 0
     best_loss = float('inf')
     loss_list = []
+    acc_list = []
     best_accuracy = 0
 
     # start visdom
@@ -145,10 +146,12 @@ def train_cell2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
                     loss_list.clear()
                     checkpoint = {'model': model.state_dict(), 'optimizer': optimizer.state_dict(), 'epoch': epoch}
                     torch.save(checkpoint, f'model/checkpoint_{embedding_size}_{round(float(loss), 3)}.pth')
+                if np.mean(acc_list) * np_save_rate > best_accuracy:
+                    avg_acc = float(np.mean(acc_list))
+                    best_accuracy = avg_acc
+                    np.save(f'model/cell_embedding_{embedding_size}_{round(avg_acc, 2)}', model.input_embedding())
             acc = evaluate_cell2vec(model.input_embedding(), dataset)
-            if acc * np_save_rate > best_accuracy:
-                best_accuracy = acc
-                np.save(f'model/cell_embedding_{embedding_size}_{round(acc, 2)}', model.input_embedding())
+            acc_list.append(acc)
             if visdom:
                 env.line(
                     X=np.array([(epoch - epoch_start) * iter_num + i]),
@@ -158,14 +161,15 @@ def train_cell2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
                     update='append')
                 env.line(
                     X=np.array([(epoch - epoch_start) * iter_num + i]),
-                    Y=np.array([acc]),
+                    Y=np.array([acc_list]),
                     name='accuracy',
                     win=pane1,
                     update='append')
 
 
 def evaluate_cell2vec(embedding_weights, dataset, test_num=10):
-    random.seed(20000221)
+    # random.seed(20000221)
+    random.seed(19991014)
     samples_index = random.sample(range(len(dataset)), test_num)
     samples_weights = embedding_weights[samples_index, :]
 
@@ -188,5 +192,5 @@ if __name__ == "__main__":
     embedding_weights = np.load('model/cell_embedding_256_73.5.npy')
     t = utils.Timer()
     t.tik()
-    accuracy = evaluate_cell2vec(embedding_weights, dataset, test_num=5)
+    accuracy = evaluate_cell2vec(embedding_weights, dataset, test_num=10000)
     t.tok(accuracy)
