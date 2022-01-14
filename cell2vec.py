@@ -121,13 +121,14 @@ def train_cell2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
         model.load_state_dict(torch.load(pretrained))
 
     # start training
-    timer.tik(f'training start time : {timer.now()}\n'
+    print(f'training start time : {timer.now()}\n'
               f'window_size : {dataset.window_size}\n'
               f'batch_size : {dataloader.batch_size}\n'
               f'embedding_size : {model.embedding_size}\n'
               f'epoch_num : {epoch_num}\n'
               f'learning_rate : {learning_rate}\n'
               f'device : {device}\n')
+    timer.tik("training")
     for epoch in range(epoch_start, epoch_num):
         for i, (center, positive, negative) in enumerate(dataloader):
             optimizer.zero_grad()
