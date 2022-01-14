@@ -41,7 +41,7 @@ class Timer:
         print(f"{str} done, {round(time.time() - self.bgt, 3)}s after {self.start} start")
 
     def now(self):
-        return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        return time.strftime("%Y-%m-%d %H-%M-%S", time.localtime())
 
 
 class Logger(object):

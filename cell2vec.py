@@ -1,16 +1,15 @@
 import json
+import os
 import random
+import time
 
 import utils
 import torch.nn.functional as F
 import torch
 import numpy as np
 from sklearn.neighbors import KDTree
-from sklearn.neighbors import BallTree
 import torch.nn as nn
-from scipy.spatial.distance import cosine as cosine_dis
 import sys
-from visdom import Visdom
 
 
 class CellEmbeddingDataset(torch.utils.data.Dataset):
@@ -69,12 +68,12 @@ class Cell2Vec(nn.Module):
 def train_cell2vec(file, window_size, embedding_size, batch_size, epoch_num, learning_rate, checkpoint, pretrained,
                    visdom):
     # init
-    sys.stdout = utils.Logger('log/train_cell2vec.log')
     timer = utils.Timer()
+    sys.stdout = utils.Logger(f'log/train_cell2vec_{timer.now()}.log')
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     neg_rate = 100  # negative sampling rate
-    save_rate = 0.9
 
+    # read dict
     timer.tik("read json")
     with open(file) as f:
         str_cell2idx = json.load(f)
@@ -82,25 +81,34 @@ def train_cell2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
     cell2idx = {eval(c): str_cell2idx[c] for c in list(str_cell2idx)}
     timer.tok()
 
+    # build dataset
     timer.tik("build dataset")
     dataset = CellEmbeddingDataset(cell2idx, window_size, neg_rate)
     dataloader = torch.utils.data.DataLoader(dataset=dataset, batch_size=batch_size, shuffle=True)
     timer.tok()
 
-    timer.tik("training")
+    # training preparation
+    model = Cell2Vec(len(cell2idx), embedding_size).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    model.train()
+    cp_save_rate = 0.8
+    np_save_rate = 0.95
+    iter_num = len(dataset) // batch_size + 1
+    epoch_start = 0
+    best_loss = float('inf')
+    loss_list = []
+    best_accuracy = 0
+
+    # start visdom
     if visdom:
-        env2 = Visdom()
-        pane1 = env2.line(
+        from visdom import Visdom
+        env = Visdom()
+        pane1 = env.line(
             X=np.array([0]),
             Y=np.array([0]),
             opts=dict(title='loss'))
-    model = Cell2Vec(len(cell2idx), embedding_size).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    epoch_start = 0
-    model.train()
-    last_loss = float('inf')
-    loss_list = []
-    loss = 0
+
+    # load checkpoint / pretrained_state_dict
     if checkpoint is not None:
         checkpoint = torch.load(checkpoint)
         if checkpoint.get('model'):
@@ -111,50 +119,61 @@ def train_cell2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
             epoch_start = checkpoint['epoch'] + 1
     elif pretrained is not None:
         model.load_state_dict(torch.load(pretrained))
-    print(f'start time : {timer.now()}\nwindow_size : {dataset.window_size}\nbatch_size : {dataloader.batch_size}'
-          f'\nembedding_size : {model.embedding_size}\nepoch_num : {epoch_num}\nlearning_rate : {learning_rate}'
-          f'\ndevice : {device}')
 
+    # start training
+    timer.tik(f'training start time : {timer.now()}\n'
+              f'window_size : {dataset.window_size}\n'
+              f'batch_size : {dataloader.batch_size}\n'
+              f'embedding_size : {model.embedding_size}\n'
+              f'epoch_num : {epoch_num}\n'
+              f'learning_rate : {learning_rate}\n'
+              f'device : {device}\n')
     for epoch in range(epoch_start, epoch_num):
         for i, (center, positive, negative) in enumerate(dataloader):
             optimizer.zero_grad()
             loss = model(center.to(device), positive.to(device), negative.to(device)).mean()
             loss.backward()
             optimizer.step()
+
             loss_list.append(float(loss))
-            if i % 50 == 0:
-                timer.tok(f"epoch:{epoch}, iter:{i}/{len(cell2idx) // batch_size} loss:{loss}")
-                if not (i == 0 and epoch == epoch_start):
-                    if np.mean(loss_list) < save_rate * last_loss:
-                        last_loss = np.mean(loss_list)
-                        loss_list.clear()
-                        checkpoint = {'model': model.state_dict(), 'optimizer': optimizer.state_dict(), 'epoch': epoch}
-                        torch.save(checkpoint, f'model/checkpoint_{embedding_size}_{round(float(loss), 3)}.pth')
+            if i % (iter_num // 4 + 1) == 0:
+                timer.tok(f"epoch:{epoch}, iter:{i}/{iter_num} loss:{loss}")
+                if np.mean(loss_list) < cp_save_rate * best_loss and not (i == 0 and epoch == epoch_start):
+                    best_loss = np.mean(loss_list)
+                    loss_list.clear()
+                    checkpoint = {'model': model.state_dict(), 'optimizer': optimizer.state_dict(), 'epoch': epoch}
+                    torch.save(checkpoint, f'model/checkpoint_{embedding_size}_{round(float(loss), 3)}.pth')
+            acc = evaluate_cell2vec(model.input_embedding(), dataset)
+            if acc * np_save_rate > best_accuracy:
+                best_accuracy = acc
+                np.save(f'model/cell_embedding_{embedding_size}_{round(acc, 2)}', model.input_embedding())
             if visdom:
-                env2.line(
-                    X=np.array([epoch * (len(cell2idx) // batch_size + 1) + i]),
+                env.line(
+                    X=np.array([epoch * iter_num + i]),
                     Y=np.array([float(loss)]),
+                    name='loss',
                     win=pane1,  # win参数确认使用哪一个pane
                     update='append')
-            # evaluate_cell2vec(model.input_embedding(), dataset, window_size)
-    embedding_weights = model.input_embedding()
-    np.save(f'model/cell_embedding_{embedding_size}_{round(float(loss), 3)}', embedding_weights)
+                env.line(
+                    X=np.array([epoch * iter_num + i]),
+                    Y=np.array([acc]),
+                    name='accuracy',
+                    win=pane1,
+                    update='append')
 
 
-def evaluate_cell2vec(embedding_weights, dataset):
-    vocab_size = len(dataset)
-    for i in range(10):
-        idx = random.randint(0, vocab_size)
-        truth = dataset[idx][1].numpy()
-        predict = []
-        for j in range(embedding_weights.shape[0]):
-            if j == idx:
-                continue
-            dis = cosine_dis(embedding_weights[idx], embedding_weights[j])
-            predict.append((j, dis))
-        predict.sort(key=lambda x: x[1])
-        predict = [t[0] for t in predict[:dataset.window_size]]
-        print(len(set(predict) & set(truth)))
+def evaluate_cell2vec(embedding_weights, dataset, test_num=10):
+    random.seed(20000221)
+    samples_index = random.sample(range(len(dataset)), test_num)
+    samples_weights = embedding_weights[samples_index, :]
+
+    from scipy.spatial.distance import cdist
+    nearest_index = cdist(samples_weights, embedding_weights, metric='cosine').argsort(axis=1)
+
+    predict = list(nearest_index[:, 1:dataset.window_size + 1])
+    truth = [dataset[idx][1].numpy() for idx in samples_index]
+    accuracy = np.mean([len(np.intersect1d(predict[i], truth[i])) for i in range(test_num)]) / dataset.window_size * 100
+    return accuracy
 
 
 if __name__ == "__main__":
@@ -163,18 +182,10 @@ if __name__ == "__main__":
         f.close()
     cell2idx = {eval(c): str_cell2idx[c] for c in list(str_cell2idx)}
 
-    dataset = CellEmbeddingDataset(cell2idx, 20, 100)
-    embedding_weights = np.load('model/cell_embedding_128_0.03.npy')
-    vocab_size = len(dataset)
-    for i in range(10):
-        idx = random.randint(0, vocab_size)
-        truth = dataset[idx][1].numpy()
-        predict = []
-        for j in range(embedding_weights.shape[0]):
-            if j == idx:
-                continue
-            dis = cosine_dis(embedding_weights[idx], embedding_weights[j])
-            predict.append((j, dis))
-        predict.sort(key=lambda x: x[1])
-        predict = [t[0] for t in predict[:dataset.window_size]]
-        print(len(set(predict) & set(truth)))
+    dataset = CellEmbeddingDataset(cell2idx, window_size=20, neg_rate=100)
+    embedding_weights = np.load('model/cell_embedding_256_73.5.npy')
+    t = utils.Timer()
+    t.tik()
+    accuracy = evaluate_cell2vec(embedding_weights, dataset, test_num=5)
+    t.tok(accuracy)
+

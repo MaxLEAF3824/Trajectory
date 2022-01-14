@@ -11,15 +11,15 @@ parser.add_argument('--embedding_size', '-emb', type=int, default=256)
 
 parser.add_argument('--batch_size', '-b', type=int, default=256)
 
-parser.add_argument('--epoch_num', '-epoch', type=int, default=10)
+parser.add_argument('--epoch_num', '-ep', type=int, default=10)
 
-parser.add_argument('--learning_rate', '-lr', type=float, default=1e-2)
+parser.add_argument('--learning_rate', '-lr', type=float, default=1e-3)
 
 parser.add_argument('--checkpoint', '-cp', type=str, default=None)
 
 parser.add_argument('--pretrained', '-pre', type=str, default=None)
 
-parser.add_argument('--visdom', '-vis', type=int, default=1)
+parser.add_argument('--visdom', '-vis', type=int, default=0)
 
 args = parser.parse_args()
 
