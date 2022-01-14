@@ -66,7 +66,8 @@ class Cell2Vec(nn.Module):
         return self.in_embedding.weight.data.cpu().numpy()
 
 
-def train_cell2vec(file, window_size, embedding_size, batch_size, epoch_num, learning_rate, checkpoint, pretrained):
+def train_cell2vec(file, window_size, embedding_size, batch_size, epoch_num, learning_rate, checkpoint, pretrained,
+                   visdom):
     # init
     sys.stdout = utils.Logger('log/train_cell2vec.log')
     timer = utils.Timer()
@@ -87,11 +88,12 @@ def train_cell2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
     timer.tok()
 
     timer.tik("training")
-    env2 = Visdom()
-    pane1 = env2.line(
-        X=np.array([0]),
-        Y=np.array([0]),
-        opts=dict(title='loss'))
+    if visdom:
+        env2 = Visdom()
+        pane1 = env2.line(
+            X=np.array([0]),
+            Y=np.array([0]),
+            opts=dict(title='loss'))
     model = Cell2Vec(len(cell2idx), embedding_size).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     epoch_start = 0
@@ -127,11 +129,12 @@ def train_cell2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
                     loss_list.clear()
                     checkpoint = {'model': model.state_dict(), 'optimizer': optimizer.state_dict(), 'epoch': epoch}
                     torch.save(checkpoint, f'model/checkpoint_{embedding_size}_{round(float(loss), 3)}.pth')
-            env2.line(
-                X=np.array([epoch * (len(cell2idx) // batch_size + 1) + i]),
-                Y=np.array([float(loss)]),
-                win=pane1,  # win参数确认使用哪一个pane
-                update='append')
+            if visdom:
+                env2.line(
+                    X=np.array([epoch * (len(cell2idx) // batch_size + 1) + i]),
+                    Y=np.array([float(loss)]),
+                    win=pane1,  # win参数确认使用哪一个pane
+                    update='append')
             # evaluate_cell2vec(model.input_embedding(), dataset, window_size)
     embedding_weights = model.input_embedding()
     np.save(f'model/cell_embedding_{embedding_size}_{round(float(loss), 3)}', embedding_weights)
