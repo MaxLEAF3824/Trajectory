@@ -122,13 +122,14 @@ def train_cell2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
             loss.backward()
             optimizer.step()
             loss_list.append(float(loss))
-            if i % 50 == 0 and not (i == 0 and epoch == epoch_start):
+            if i % 50 == 0:
                 timer.tok(f"epoch:{epoch}, iter:{i}/{len(cell2idx) // batch_size} loss:{loss}")
-                if np.mean(loss_list) < save_rate * last_loss:
-                    last_loss = np.mean(loss_list)
-                    loss_list.clear()
-                    checkpoint = {'model': model.state_dict(), 'optimizer': optimizer.state_dict(), 'epoch': epoch}
-                    torch.save(checkpoint, f'model/checkpoint_{embedding_size}_{round(float(loss), 3)}.pth')
+                if not (i == 0 and epoch == epoch_start):
+                    if np.mean(loss_list) < save_rate * last_loss:
+                        last_loss = np.mean(loss_list)
+                        loss_list.clear()
+                        checkpoint = {'model': model.state_dict(), 'optimizer': optimizer.state_dict(), 'epoch': epoch}
+                        torch.save(checkpoint, f'model/checkpoint_{embedding_size}_{round(float(loss), 3)}.pth')
             if visdom:
                 env2.line(
                     X=np.array([epoch * (len(cell2idx) // batch_size + 1) + i]),
