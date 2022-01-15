@@ -153,6 +153,8 @@ def train_cell2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
                 acc = evaluate_cell2vec(model.input_embedding(), dataset, test_num=100)
                 timer.tok(f"epoch:{epoch} iter:{i}/{iter_num} loss:{round(float(loss), 3)} acc:{round(acc, 3)}")
                 if i == 0 and epoch == epoch_start:
+                    best_loss = np.mean(loss_list)
+                    best_accuracy = acc
                     continue
                 if np.mean(loss_list) < cp_save_rate * best_loss:
                     best_loss = np.mean(loss_list)
