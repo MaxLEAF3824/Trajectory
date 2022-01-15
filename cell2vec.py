@@ -178,7 +178,6 @@ def train_cell2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
 
 def evaluate_cell2vec(embedding_weights, dataset, test_num=10):
     random.seed(20000221)
-    # random.seed(19991014)
     samples_index = random.sample(range(len(dataset)), test_num)
     samples_weights = embedding_weights[samples_index, :]
 
@@ -190,16 +189,3 @@ def evaluate_cell2vec(embedding_weights, dataset, test_num=10):
     accuracy = np.mean([len(np.intersect1d(predict[i], truth[i])) for i in range(test_num)]) / dataset.window_size
     return accuracy
 
-
-if __name__ == "__main__":
-    with open('data/str_cell2idx_800.json') as f:
-        str_cell2idx = json.load(f)
-        f.close()
-    cell2idx = {eval(c): str_cell2idx[c] for c in list(str_cell2idx)}
-
-    dataset = CellEmbeddingDataset(cell2idx, window_size=20, neg_rate=100)
-    embedding_weights = np.load('model/cell_embedding_256_73.5.npy')
-    t = utils.Timer()
-    t.tik()
-    accuracy = evaluate_cell2vec(embedding_weights, dataset, test_num=10000)
-    t.tok(accuracy)
