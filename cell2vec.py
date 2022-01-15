@@ -97,7 +97,6 @@ def train_cell2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
     epoch_start = 0
     best_loss = float('inf')
     loss_list = []
-    acc_list = []
     best_accuracy = 0
     last_save_epoch = 0
 
@@ -144,18 +143,11 @@ def train_cell2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
             loss.backward()
             optimizer.step()
             loss_list.append(float(loss))
-            acc = evaluate_cell2vec(model.input_embedding(), dataset)
-            acc_list.append(acc)
             if visdom_port != 0:
                 env.line(
                     X=np.array([(epoch - epoch_start) * iter_num + i]),
                     Y=np.array([float(loss)]),
                     win=pane1,  # win参数确认使用哪一个pane
-                    update='append')
-                env.line(
-                    X=np.array([(epoch - epoch_start) * iter_num + i]),
-                    Y=np.array([acc_list]),
-                    win=pane2,
                     update='append')
             if i % (iter_num // 4 + 1) == 0:
                 timer.tok(f"epoch:{epoch} iter:{i}/{iter_num} loss:{round(float(loss), 3)} acc:{round(acc, 3)}")
@@ -170,15 +162,21 @@ def train_cell2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
                     last_save_epoch = epoch
                     checkpoint = {'model': model.state_dict(), 'optimizer': optimizer.state_dict(), 'epoch': epoch}
                     torch.save(checkpoint, f'model/checkpoint_{embedding_size}_{epoch}_{i}_{round(float(loss), 3)}.pth')
-                if np.mean(acc_list) * np_save_rate > best_accuracy:
-                    avg_acc = float(np.mean(acc_list))
-                    best_accuracy = avg_acc
-                    np.save(f'model/cell_embedding_{embedding_size}_{round(avg_acc, 2)}', model.input_embedding())
+                acc = evaluate_cell2vec(model.input_embedding(), dataset, test_num=100)
+                if visdom_port != 0:
+                    env.line(
+                        X=np.array([(epoch - epoch_start) * iter_num + i]),
+                        Y=np.array([acc]),
+                        win=pane2,
+                        update='append')
+                if acc * np_save_rate > best_accuracy:
+                    best_accuracy = acc
+                    np.save(f'model/cell_embedding_{embedding_size}_{round(acc, 2)}', model.input_embedding())
 
 
 def evaluate_cell2vec(embedding_weights, dataset, test_num=10):
-    # random.seed(20000221)
-    random.seed(19991014)
+    random.seed(20000221)
+    # random.seed(19991014)
     samples_index = random.sample(range(len(dataset)), test_num)
     samples_weights = embedding_weights[samples_index, :]
 
