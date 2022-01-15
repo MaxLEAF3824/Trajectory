@@ -150,6 +150,7 @@ def train_cell2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
                     win=pane1,  # win参数确认使用哪一个pane
                     update='append')
             if i % (iter_num // 4 + 1) == 0:
+                acc = evaluate_cell2vec(model.input_embedding(), dataset, test_num=100)
                 timer.tok(f"epoch:{epoch} iter:{i}/{iter_num} loss:{round(float(loss), 3)} acc:{round(acc, 3)}")
                 if i == 0 and epoch == epoch_start:
                     continue
@@ -162,7 +163,6 @@ def train_cell2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
                     last_save_epoch = epoch
                     checkpoint = {'model': model.state_dict(), 'optimizer': optimizer.state_dict(), 'epoch': epoch}
                     torch.save(checkpoint, f'model/checkpoint_{embedding_size}_{epoch}_{i}_{round(float(loss), 3)}.pth')
-                acc = evaluate_cell2vec(model.input_embedding(), dataset, test_num=100)
                 if visdom_port != 0:
                     env.line(
                         X=np.array([(epoch - epoch_start) * iter_num + i]),
