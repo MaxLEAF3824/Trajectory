@@ -1,5 +1,5 @@
 import argparse
-from cell2vec import train_cell2vec
+from grid2vec import train_grid2vec
 
 parser = argparse.ArgumentParser(description="train.py")
 
@@ -26,5 +26,5 @@ args = parser.parse_args()
 
 print(args)
 
-train_cell2vec(args.dict_file, args.window_size, args.embedding_size, args.batch_size, args.epoch_num,
+train_grid2vec(args.dict_file, args.window_size, args.embedding_size, args.batch_size, args.epoch_num,
                args.learning_rate, args.checkpoint, args.pretrained, args.visdom_port)
