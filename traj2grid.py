@@ -3,7 +3,7 @@ from geopy.distance import geodesic as dis
 import numpy as np
 
 
-class Traj2Cell:
+class Traj2Grid:
     def __init__(self, m, n, min_lon, min_lat, max_lon, max_lat):
         self.cell2idx = {}
         self.row_num = m  # 行数
@@ -88,7 +88,7 @@ if __name__ == "__main__":
     from args import row_num, column_num, min_lon, min_lat, max_lon, max_lat
 
     timer = utils.Timer()
-    t2c = Traj2Cell(row_num, column_num, min_lon, min_lat, max_lon, max_lat)
+    t2c = Traj2Grid(row_num, column_num, min_lon, min_lat, max_lon, max_lat)
     print(t2c.cell_shape)
     timer.tik()
     value_counts = None

@@ -17,14 +17,6 @@ def copy_big_file(in_name, out_name, line_num):
     print('done')
 
 
-def parallel_do(func, arg_list, job_num=6):
-    from multiprocess.pool import Pool
-    pool = Pool(job_num)
-    pool.map(func, arg_list)
-    pool.close()
-    pool.join()
-
-
 class Timer:
     def __init__(self):
         self.start = "tik"
