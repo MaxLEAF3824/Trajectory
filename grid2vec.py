@@ -14,16 +14,16 @@ import sys
 
 
 class GridEmbeddingDataset(torch.utils.data.Dataset):
-    def __init__(self, cell2idx: dict, window_size, neg_rate):
+    def __init__(self, grid2idx: dict, window_size, neg_rate):
         self.window_size = window_size
         self.neg_rate = neg_rate
-        self.cell2idx = cell2idx
-        idx2cell = {cell2idx[c]: c for c in cell2idx}
-        self.sorted_cells = []
-        for i in range(len(cell2idx)):
-            self.sorted_cells.append(idx2cell[i])
-        self.tree = KDTree(self.sorted_cells)
-        distance, index = self.tree.query(self.sorted_cells, k=window_size + 1)
+        self.grid2idx = grid2idx
+        idx2grid = {grid2idx[c]: c for c in grid2idx}
+        self.sorted_grid = []
+        for i in range(len(grid2idx)):
+            self.sorted_grid.append(idx2grid[i])
+        self.tree = KDTree(self.sorted_grid)
+        distance, index = self.tree.query(self.sorted_grid, k=window_size + 1)
         index = torch.tensor(index)
         distance = torch.tensor(distance)
         index = torch.unsqueeze(index[:, 1:], 2)
@@ -32,17 +32,17 @@ class GridEmbeddingDataset(torch.utils.data.Dataset):
         self.positive = torch.cat((index, distance), 2)
 
     def __len__(self):
-        return len(self.cell2idx)
+        return len(self.grid2idx)
 
     def __getitem__(self, idx):
-        ones = torch.ones(len(self.cell2idx))
+        ones = torch.ones(len(self.grid2idx))
         ones[idx] = 0
         p_i = self.positive[idx, :, 0].long()
         ones[p_i] = 0
         neg_index = torch.unsqueeze(torch.multinomial(ones, self.neg_rate * self.window_size, replacement=True), 1)
         neg_dis = torch.empty_like(neg_index).float()
         for i in range(len(neg_index)):
-            neg_dis[i] = euclidean(self.sorted_cells[neg_index[i]], self.sorted_cells[idx])
+            neg_dis[i] = euclidean(self.sorted_grid[neg_index[i]], self.sorted_grid[idx])
         neg_dis = F.softmax(-neg_dis,dim=1)
         return torch.tensor([idx]), self.positive[idx], torch.cat((neg_index, neg_dis), 1)
 
@@ -81,26 +81,26 @@ def train_grid2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
                    visdom_port):
     # init
     timer = utils.Timer()
-    sys.stdout = utils.Logger(f'log/train_cell2vec_{timer.now()}.log')
+    sys.stdout = utils.Logger(f'log/train_grid2vec_{timer.now()}.log')
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     neg_rate = 100  # negative sampling rate
 
     # read dict
     timer.tik("read json")
     with open(file) as f:
-        str_cell2idx = json.load(f)
+        str_grid2idx = json.load(f)
         f.close()
-    cell2idx = {eval(c): str_cell2idx[c] for c in list(str_cell2idx)}
+    grid2idx = {eval(c): str_grid2idx[c] for c in list(str_grid2idx)}
     timer.tok()
 
     # build dataset
     timer.tik("build dataset")
-    dataset = GridEmbeddingDataset(cell2idx, window_size, neg_rate)
+    dataset = GridEmbeddingDataset(grid2idx, window_size, neg_rate)
     dataloader = torch.utils.data.DataLoader(dataset=dataset, batch_size=batch_size, shuffle=True)
     timer.tok()
 
     # training preparation
-    model = Grid2Vec(len(cell2idx), embedding_size).to(device)
+    model = Grid2Vec(len(grid2idx), embedding_size).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     model.train()
     cp_save_rate = 0.8
@@ -185,7 +185,7 @@ def train_grid2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
                         update='append')
                 if acc * np_save_rate > best_accuracy:
                     best_accuracy = acc
-                    np.save(f'model/cell_embedding_{embedding_size}_{round(acc, 2)}', model.input_embedding())
+                    np.save(f'model/grid_embedding_{embedding_size}_{round(acc, 2)}', model.input_embedding())
 
 
 def evaluate_grid2vec(embedding_weights, dataset, test_num=10):

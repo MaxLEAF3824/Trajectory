@@ -3,7 +3,7 @@ from grid2vec import train_grid2vec
 
 parser = argparse.ArgumentParser(description="train.py")
 
-parser.add_argument('--dict_file', '-f', type=str, default="data/str_cell2idx_800.json")
+parser.add_argument('--dict_file', '-f', type=str, default="data/str_grid2idx_800.json")
 
 parser.add_argument('--window_size', '-w', type=int, default=20)
 

@@ -3,11 +3,13 @@ import sys
 import os
 
 
-def copy_big_file(in_name, out_name, line_num):
+def copy_big_file(in_name, line_num, start_line_num=0):
     count = 0
     fr = open(f"data/{in_name}")
-    fw = open(f"data/{out_name}", "w")
+    fw = open(f"data/{in_name}_{start_line_num}_{line_num}", "w")
     line = fr.readline()
+    for i in range(start_line_num):
+        line = fr.readline()
     while line and count <= line_num:
         fw.write(line)
         count += 1

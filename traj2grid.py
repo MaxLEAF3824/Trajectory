@@ -26,11 +26,11 @@ class Traj2Grid:
             int((point[1] - self.min_lat) // self.h),
         )
 
-    def build_vocab(self, cell_count: dict, lower_bound=1):
+    def build_vocab(self, grid_count: dict, lower_bound=1):
         self.grid2idx.clear()
-        for idx, cell in enumerate(cell_count):
-            if cell_count[cell] >= lower_bound:
-                self.grid2idx[cell] = idx
+        for idx, grid in enumerate(grid_count):
+            if grid_count[grid] >= lower_bound:
+                self.grid2idx[grid] = idx
         return self.grid2idx
 
     def set_vocab(self, grid2idx):
@@ -40,21 +40,21 @@ class Traj2Grid:
         traj_1d = []
         if not self.grid2idx:
             print("vocab is not built.")
-            return []
+            return traj_1d
         for p in traj:
-            cell = self.convert2d_point(p)
-            if self.grid2idx.get(cell):
-                traj_1d.append(self.grid2idx[cell])
+            grid = self.convert2d_point(p)
+            if self.grid2idx.get(grid):
+                traj_1d.append(self.grid2idx[grid])
         return traj_1d
 
-    def draw_cell(self, cell_count: dict, file_name="cells.png"):
+    def draw_grid(self, grid_count: dict, file_name="grids.png"):
         from PIL import Image
 
         img = Image.new("RGB", (self.row_num, self.column_num))
-        mean = np.mean(list(cell_count.values()))
-        std = np.std(list(cell_count.values()))
-        for cell in self.grid2idx:
-            percent = 50 * (cell_count[cell] - mean) / std + 50
+        mean = np.mean(list(grid_count.values()))
+        std = np.std(list(grid_count.values()))
+        for grid in self.grid2idx:
+            percent = 50 * (grid_count[grid] - mean) / std + 50
             if percent < 50:
                 green = 255
                 red = percent * 5.12
@@ -62,7 +62,7 @@ class Traj2Grid:
                 red = 255
                 green = 256 - (percent - 50) * 5.12
             color = (int(red), int(green), 0, 100)
-            img.putpixel((cell[0], cell[1]), color)
+            img.putpixel((grid[0], grid[1]), color)
         img = img.resize((800, 800))
         img.save(file_name)
 
@@ -98,11 +98,11 @@ if __name__ == "__main__":
     value_counts = value_counts.to_dict()
     grid2idx = t2g.build_vocab(value_counts)
     timer.tok("build_vocab")
-    str_grid2idx = {f"({cell[0]},{cell[1]})": grid2idx[cell] for cell in grid2idx}
+    str_grid2idx = {f"({grid[0]},{grid[1]})": grid2idx[grid] for grid in grid2idx}
 
     import json
 
     js = json.dumps(str_grid2idx)
-    with open(f"data/str_cell2idx_{row_num}.json", "w") as f:
+    with open(f"data/str_grid2idx_{row_num}.json", "w") as f:
         f.write(js)
         f.close()

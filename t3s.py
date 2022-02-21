@@ -1,18 +1,36 @@
 import torch
 from torch import nn
+import numpy as np
+import json
+from traj2grid import *
+import random
+import sys
 
 
 class MetricLearningDataset(torch.utils.data.Dataset):
-    def __init__(self, traj2grid, Y, metric):
-        self.converter = traj2grid
-        self.Y = Y
+    def __init__(self, file_train, grid2idx, metric="lcss", max_len=512):
+        json_obj = json.load(open(file_train))
+        self.grid2idx = grid2idx
+        self.origin_data = list(json_obj["origin_traj"].values())
+        self.data = list(json_obj["traj"].values())
+        # turn the trajectory to max_len
+        for i in range(len(self.data)):
+            traj = np.array(self.data[i])
+            if len(traj) > max_len:
+                idx = [0] + sorted(random.sample(range(1, len(traj) - 1), max_len - 2)) + [len(traj) - 1]
+                traj = traj[idx]
+            elif len(traj) < max_len:
+                traj = np.pad(traj, (0, max_len - len(traj)), "constant", constant_values=0)
+            self.data[i] = traj
+        # turn traj to tensor
+        self.data = torch.tensor(np.array(self.data), dtype=torch.float)
         self.metric = metric
 
     def __len__(self):
-        return len(self.X)
+        return len(self.data)
 
     def __getitem__(self, idx):
-        return self.X[idx], self.Y[idx], self.metric[idx]
+        return self.data[idx]
 
 
 class T3S(nn.Module):
@@ -40,22 +58,35 @@ class T3S(nn.Module):
         return output
 
 
+def Loss_NCE(output: torch.Tensor, x: torch.Tensor):
+    return 0
+
+
 def Trainer(model, train_loader, optimizer, epochs=10, device="cuda"):
+    # init
+    timer = utils.Timer()
+    sys.stdout = utils.Logger(f"log/train_grid2vec_{timer.now()}.log")
+
     model.to(device)
+    model.train()
     for epoch in range(epochs):
-        model.train()
-        for batch_idx, (x, y, metric) in enumerate(train_loader):
+        # train
+        for idx, x in enumerate(train_loader):
             x = x.to(device)
-            y = y.to(device)
-            metric = metric.to(device)
             optimizer.zero_grad()
             output = model(x)
+            loss = Loss_NCE(output, x)
+            loss.backward()
+            optimizer.step()
+            print(f"epoch: {epoch}, idx: {idx}, loss: {loss}")
 
 
 if __name__ == "__main__":
-    src = torch.tensor([1, 2, 4, 5, 6, 7, 4])
-    src.unsqueeze_(0)
+    dataset_dir = "/home/yqguo/coding/Trajectory/data/"
+    with open(dataset_dir + "str_grid2idx_800.json") as f:
+        str_grid2idx = json.load(f)
+        f.close()
+    grid2idx = {eval(c): str_grid2idx[c] for c in list(str_grid2idx)}
+    dataset = MetricLearningDataset(dataset_dir + "100k_gps_20161101_reformat.json", grid2idx)
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=True)
     T3S = T3S(vocab_size=100).cuda()
-    output = T3S(src)
-    print(output.shape)
-
