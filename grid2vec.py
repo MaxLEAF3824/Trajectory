@@ -28,8 +28,8 @@ class GridEmbeddingDataset(torch.utils.data.Dataset):
         distance = torch.tensor(distance)
         index = torch.unsqueeze(index[:, 1:], 2)
         distance = torch.unsqueeze(distance[:, 1:], 2)
-        distance = F.softmax(-distance, dim=1)
-        self.positive = torch.cat((index, distance), 2)
+        weight = F.softmax(-distance, dim=1) * window_size
+        self.positive = torch.cat((index, weight), 2)
 
     def __len__(self):
         return len(self.grid2idx)
@@ -39,12 +39,8 @@ class GridEmbeddingDataset(torch.utils.data.Dataset):
         ones[idx] = 0
         p_i = self.positive[idx, :, 0].long()
         ones[p_i] = 0
-        neg_index = torch.unsqueeze(torch.multinomial(ones, self.neg_rate * self.window_size, replacement=True), 1)
-        neg_dis = torch.empty_like(neg_index).float()
-        for i in range(len(neg_index)):
-            neg_dis[i] = euclidean(self.sorted_grid[neg_index[i]], self.sorted_grid[idx])
-        neg_dis = F.softmax(-neg_dis,dim=1)
-        return torch.tensor([idx]), self.positive[idx], torch.cat((neg_index, neg_dis), 1)
+        neg_index = torch.multinomial(ones, self.neg_rate * self.window_size, replacement=True)
+        return torch.tensor([idx]), self.positive[idx], neg_index
 
 
 class Grid2Vec(nn.Module):
@@ -62,14 +58,15 @@ class Grid2Vec(nn.Module):
         :param negative: [batch_size, window_size * neg_rate, 2]
         :return: loss, [batch_size]
         """
+        center.squeeze_()
         c_vec = self.in_embedding(center).unsqueeze(2)  # [batch, embedding_size, 1]
-        p_vec = self.out_embedding(positive[:, :, 0])  # [batch, window_size, embedding_size]
-        n_vec = self.out_embedding(negative[:, :, 0])  # [batch, window_size * neg_rate, embedding_size]
+        p_vec = self.out_embedding(positive[:, :, 0].long()).squeeze()  # [batch, window_size, embedding_size]
+        n_vec = self.out_embedding(negative).squeeze()  # [batch, window_size * neg_rate, embedding_size]
 
         p_dot = torch.bmm(p_vec, c_vec)  # [batch, w_s]
         n_dot = torch.bmm(n_vec, -c_vec)  # [batch, w_s * n_r]
-        log_pos = torch.dot(F.logsigmoid(p_dot), positive[:, :, 1])  # [batch, w_s]
-        log_neg = torch.dot(F.logsigmoid(n_dot), negative[:, :, 1])  # [batch, w_s * n_r]
+        log_pos = torch.mul(F.logsigmoid(p_dot).squeeze(), positive[:, :, 1])  # [batch, w_s]
+        log_neg = F.logsigmoid(n_dot)  # [batch, w_s * n_r]
         loss = -(log_pos.sum(1) + log_neg.sum(1))  # [batch]
         return loss
 
@@ -81,7 +78,7 @@ def train_grid2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
                    visdom_port):
     # init
     timer = utils.Timer()
-    sys.stdout = utils.Logger(f'log/train_grid2vec_{timer.now()}.log')
+    # sys.stdout = utils.Logger(f'log/train_grid2vec_{timer.now()}.log')
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     neg_rate = 100  # negative sampling rate
 
