@@ -9,7 +9,7 @@ import random
 timer = Timer()
 
 
-def data_reformat(file_path, dict_path="/home/yqguo/coding/Trajectory/data/str_grid2idx_800.json",max_len=512):
+def data_reformat(file_path, row_num=400, column_num=400,dict_path="/home/yqguo/coding/Trajectory/data/str_grid2idx_400.json",max_len=512):
     # read data
     timer.tik()
     df = pd.DataFrame(pd.read_csv(file_path, header=None))
@@ -22,7 +22,7 @@ def data_reformat(file_path, dict_path="/home/yqguo/coding/Trajectory/data/str_g
         f.close()
     
     # set converter
-    from args import row_num, column_num, min_lon, min_lat, max_lon, max_lat
+    from args import min_lon, min_lat, max_lon, max_lat
     t2g = Traj2Grid(row_num, column_num, min_lon, min_lat, max_lon, max_lat)
     t2g.set_vocab({eval(g): str_grid2idx[g] for g in list(str_grid2idx)})
 
@@ -70,4 +70,4 @@ def data_reformat(file_path, dict_path="/home/yqguo/coding/Trajectory/data/str_g
     timer.tok("save")
 
 
-data_reformat("/home/yqguo/coding/Trajectory/data/100k_gps_20161101")
+data_reformat("/home/yqguo/coding/Trajectory/data/1m_gps_20161101")

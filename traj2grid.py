@@ -77,6 +77,8 @@ if __name__ == "__main__":
     from args import row_num, column_num, min_lon, min_lat, max_lon, max_lat
 
     timer = utils.Timer()
+    row_num = 400
+    column_num = 400
     t2g = Traj2Grid(row_num, column_num, min_lon, min_lat, max_lon, max_lat)
     print(t2g.gird_shape)
     timer.tik()
