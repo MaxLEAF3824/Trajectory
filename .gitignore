@@ -3,9 +3,5 @@
 /model/
 /cells_png/
 /log/
-/data/1m_gps_20161101
-/data/1m_gps_20161101_format
-/data/100k_gps_20161101
-/data/100k_gps_20161101_format
 __pycache__/
 /nohup.out
