@@ -8,11 +8,9 @@ from traj2grid import *
 import random
 import traj_dist.distance as tdist
 
-# from metric import lcss
-
 
 class MetricLearningDataset(torch.utils.data.Dataset):
-    def __init__(self, file_train, grid2idx, metric="edr", max_len=128, triplet_num=10):
+    def __init__(self, file_train, file_dis_info, grid2idx, metric="edr", max_len=128, triplet_num=10):
         self.metric = metric
         self.triplets_num = triplet_num
         self.saved_triplets = {}

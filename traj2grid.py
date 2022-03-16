@@ -67,25 +67,23 @@ class Traj2Grid:
         img.save(file_name)
 
 
-if __name__ == "__main__":
-    import pandas as pd
+def generate_grid2idx(row_num=400, column_num=400, data_dir="data/full"):
     import modin.pandas as pd
     import ray
-
+    import json
+    from args import min_lon, min_lat, max_lon, max_lat
+    
+    
     ray.init()
-
-    from args import row_num, column_num, min_lon, min_lat, max_lon, max_lat
-
     timer = utils.Timer()
-    row_num = 400
-    column_num = 400
+
     t2g = Traj2Grid(row_num, column_num, min_lon, min_lat, max_lon, max_lat)
     print(t2g.gird_shape)
     timer.tik()
     value_counts = None
     for i in range(1, 31):
         df = pd.read_csv(
-            f"data/full/gps_201611{str(i).zfill(2)}",
+            f"{data_dir}/gps_201611{str(i).zfill(2)}",
             names=["name", "order_id", "time", "lon", "lat"],
             usecols=["lon", "lat"],
         )  # lon经度 lat纬度
@@ -101,10 +99,8 @@ if __name__ == "__main__":
     grid2idx = t2g.build_vocab(value_counts)
     timer.tok("build_vocab")
     str_grid2idx = {f"({grid[0]},{grid[1]})": grid2idx[grid] for grid in grid2idx}
-
-    import json
-
-    js = json.dumps(str_grid2idx)
-    with open(f"data/str_grid2idx_{row_num}.json", "w") as f:
-        f.write(js)
-        f.close()
+    json.dump(str_grid2idx, open(f"data/str_grid2idx_{row_num}.json", "w"))
+        
+if __name__ == "__main__":
+    # generate_grid2idx()
+    pass
