@@ -3,10 +3,10 @@ import sys
 import os
 
 
-def copy_big_file(in_name, line_num, start_line_num=0):
+def copy_file(in_name, line_num, start_line_num=0, shuffle=False):
     count = 0
-    fr = open(f"data/{in_name}")
-    fw = open(f"data/{in_name}_{start_line_num}_{line_num}", "w")
+    fr = open(in_name)
+    fw = open(f"{in_name}_{start_line_num}_{line_num}", "w")
     line = fr.readline()
     for i in range(start_line_num):
         line = fr.readline()

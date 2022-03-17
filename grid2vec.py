@@ -2,7 +2,6 @@ import json
 import os
 import random
 import time
-
 import utils
 import torch.nn.functional as F
 import torch
@@ -78,7 +77,6 @@ def train_grid2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
                    visdom_port):
     # init
     timer = utils.Timer()
-    # sys.stdout = utils.Logger(f'log/train_grid2vec_{timer.now()}.log')
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     neg_rate = 100  # negative sampling rate
 
@@ -114,12 +112,12 @@ def train_grid2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
         from visdom import Visdom
         env = Visdom(port=visdom_port)
         pane1 = env.line(
-            X=np.array([0]),
-            Y=np.array([0]),
+            X=np.array([]),
+            Y=np.array([]),
             opts=dict(title='loss'))
         pane2 = env.line(
-            X=np.array([0]),
-            Y=np.array([0]),
+            X=np.array([]),
+            Y=np.array([]),
             opts=dict(title='accuracy'))
 
     # load checkpoint / pretrained_state_dict
