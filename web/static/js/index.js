@@ -63,7 +63,7 @@ var app = new Vue({
             this.mouseTool.close(true)
         },
         drawResult() {
-            this.map.clearMap();
+            // this.map.clearMap();
             this.result_trajs.forEach(function (traj) {
                 var polyline = new AMap.Polyline({
                     map: app.map,
