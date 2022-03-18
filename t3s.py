@@ -121,7 +121,6 @@ class T3S(nn.Module):
         return loss, acc
 
 
-    
 def train_t3s(args):
     timer.tik("prepare data")
     
@@ -202,21 +201,9 @@ def train_t3s(args):
             train_loss_list.append(float(loss))
             batch_count += 1
             if vp != 0:
-                env.line(
-                    X=list(range(batch_count)),
-                    Y=train_loss_list,
-                    win=pane1
-                )
-                env.line(
-                    X=list(range(epoch+1)),
-                    Y=validate_loss_list,
-                    win=pane2
-                )
-                env.line(
-                    X=list(range(epoch+1)),
-                    Y=acc_list,
-                    win=pane3
-                )
+                env.line(X=list(range(batch_count)), Y=train_loss_list, win=pane1)
+                env.line(X=list(range(epoch+1)), Y=validate_loss_list, win=pane2)
+                env.line(X=list(range(epoch+1)), Y=acc_list, win=pane3)
         if epoch % 1 == 0:
             validate_loss, acc = model.evaluate(test_loader, device)
             validate_loss_list.append(validate_loss)
