@@ -24,22 +24,33 @@
 <div id="app">
     <div class="container-fluid">
         <div class="row">
-            <div class="col-md-3" style="border: 20px #000fff;">
+            <div class="col-md-3" style="marigin: 20px #000fff;">
                 <h1>相似轨迹查询</h1>
-                <button class="btn" @click="drawPolyline" style="margin: 5px">绘制轨迹</button>
-                <button class="btn" @click="clearDrawTraj" style="margin: 5px">清除轨迹</button>
-                <div class="container-fluid">
-                    <div class="row">
-                        <div class="col-md-2">
-                            <button class="btn btn-success" id="btn_query" @click="query()">查询</button>
-                        </div>
-                        <div class="col-md-3">
-                            <select class="form-control" id="type_select">
-                                <option value="0">高效</option>
-                                <option value="1">传统</option>
-                            </select>
-                        </div>
-
+                <div class="row">
+                    <div class="col-md-4">
+                        <button class="btn" @click="drawPolyline" style="margin: 5px">绘制查询轨迹</button>
+                    </div>
+                    <div class="col-md-4">
+                        <button class="btn" @click="clearDrawTraj" style="margin: 5px">清除轨迹</button>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-4">
+                        <button class="btn" @click="uploadDataset" style="margin: 5px">批量导入轨迹</button>
+                    </div>
+                    <div class="col-md-4">
+                        <input type="file" id="file" style="margin: 5px">
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-4">
+                        <button class="btn btn-success" @click="query()" style="margin: 5px">查询相似轨迹</button>
+                    </div>
+                    <div class="col-md-3">
+                        <select class="form-control" id="type_select" style="margin: 5px">
+                            <option value="0">高效</option>
+                            <option value="1">传统</option>
+                        </select>
                     </div>
                 </div>
                 <h3>查询结果</h3>

@@ -40,7 +40,7 @@ def data_preprocess(file_path, dict_path, metric="edr", eps=eps_400_eu, full=Tru
         return series
 
     # group-apply
-    res = Parallel(n_jobs=10)(delayed(group_concat)(name, group) for name, group in df.groupby("order_id"))
+    res = Parallel(n_jobs=6)(delayed(group_concat)(name, group) for name, group in df.groupby("order_id"))
     df = pd.DataFrame(res)
     timer.tok("group-apply")
 
@@ -64,8 +64,9 @@ def data_preprocess(file_path, dict_path, metric="edr", eps=eps_400_eu, full=Tru
             if i == j + 1:
                 timer.tok(f'{i}-{round((i * i) / (n * n) * 100, 2)}%')
             return i, j, dis
-        
-        res = Parallel(n_jobs=44)(delayed(cal_dis)(i, j, arr_trajs[i], arr_trajs[j], length - 1) for i in range(length) for j in range(i))
+
+        res = Parallel(n_jobs=44)(
+            delayed(cal_dis)(i, j, arr_trajs[i], arr_trajs[j], length - 1) for i in range(length) for j in range(i))
         timer.tok("calculate distance")
         for (i, j, dis) in res:
             dis_matrix[i, j] = dis
@@ -73,11 +74,8 @@ def data_preprocess(file_path, dict_path, metric="edr", eps=eps_400_eu, full=Tru
     else:
         raiseExceptions("metric {} is not supported".format(metric))
     sorted_index = np.argsort(dis_matrix, axis=1)
-    dict_save = {}
-    dict_save['trajs'] = df["trajs"].to_list()
-    dict_save["sorted_index"] = sorted_index.tolist()
+    dict_save = {'trajs': df["trajs"].to_list(), "sorted_index": sorted_index.tolist(), 'origin_trajs': origin_trajs}
     if full:
-        dict_save['origin_trajs'] = origin_trajs
         dict_save["dis_matrix"] = dis_matrix.tolist()
     json.dump(dict_save, open(file_path + "_dataset.json", "w"))
     timer.tok("save")
@@ -85,4 +83,4 @@ def data_preprocess(file_path, dict_path, metric="edr", eps=eps_400_eu, full=Tru
 
 if __name__ == "__main__":
     # copy_file("data/full/gps_20161102",100_000)
-    data_preprocess("data/gps_20161102_0_100000", "data/str_grid2idx_400.json")
+    data_preprocess("data/1m_gps_20161101", "data/str_grid2idx_400.json", full=False)

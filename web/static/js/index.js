@@ -78,6 +78,26 @@ var app = new Vue({
                 });
             })
         },
+        uploadDataset() {
+            var file = $("#file")[0].files[0];
+            var formData = new FormData();
+            formData.append("file", file);
+            $.ajax({
+                type: "POST",
+                url: "/upload",
+                data: formData,
+                processData: false,
+                contentType: false,
+                success: function (data) {
+                    console.log(data)
+                    if (data.success) {
+                        alert("成功: " + data.msg);
+                    } else {
+                        alert("失败: " + data.msg);
+                    }
+                }
+            })
+        },
     }
 })
 
