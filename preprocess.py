@@ -47,7 +47,7 @@ def data_preprocess(file_path, dict_path, metric="edr", eps=eps_400_eu, full=Tru
 
     # filter
     t_diff_limit = 20
-    lon_lat_diff_limit = 0.
+    lon_lat_diff_limit = 0.005
     length_limit = 30
     dff = df[
         (df["max_time_diff"] < t_diff_limit)
