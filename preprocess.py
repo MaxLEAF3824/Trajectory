@@ -55,8 +55,8 @@ def data_preprocess(file_path, dict_path, metric="edr", eps=eps_400_eu, full=Tru
 
     # calculate distance
     origin_trajs = df["origin_trajs"].to_list()
-    arr_trajs = [np.array(origin_traj) for origin_traj in origin_trajs]
-    length = len(arr_trajs)
+    arr = [np.array(origin_traj) for origin_traj in origin_trajs]
+    length = len(arr)
     dis_matrix = np.zeros((length, length))
     if metric == "edr":
         def cal_dis(i, j, x, y, n):
@@ -66,7 +66,7 @@ def data_preprocess(file_path, dict_path, metric="edr", eps=eps_400_eu, full=Tru
             return i, j, dis
 
         res = Parallel(n_jobs=44)(
-            delayed(cal_dis)(i, j, arr_trajs[i], arr_trajs[j], length - 1) for i in range(length) for j in range(i))
+            delayed(cal_dis)(i, j, arr[i], arr[j], length - 1) for i in range(length) for j in range(i))
         timer.tok("calculate distance")
         for (i, j, dis) in res:
             dis_matrix[i, j] = dis
