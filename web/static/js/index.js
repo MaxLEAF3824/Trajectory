@@ -8,8 +8,8 @@ var app = new Vue({
     },
     mounted() {
         this.map = new AMap.Map("container", {
-            center: [104.04275, 30.69225],
-            zoom: 14
+            center: [104.08275, 30.67225],
+            zoom: 15
         });
         this.mouseTool = new AMap.MouseTool(this.map);
         this.mouseTool.on("draw", function (event) {
@@ -63,12 +63,13 @@ var app = new Vue({
             this.mouseTool.close(true)
         },
         drawResult() {
-            // this.map.clearMap();
+            this.map.clearMap();
             this.result_trajs.forEach(function (traj) {
+                var sim = traj.sim
                 var polyline = new AMap.Polyline({
                     map: app.map,
                     path: traj.data,
-                    strokeColor: "#41c9fa",
+                    strokeColor: "#0037ff", //线颜色
                     strokeOpacity: 1,
                     strokeWeight: 6,
                     // 线样式还支持 'dashed'
