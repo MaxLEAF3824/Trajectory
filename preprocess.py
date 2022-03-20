@@ -77,7 +77,9 @@ def data_preprocess(file_path, dict_path, metric="edr", eps=eps_400_eu, full=Tru
     dict_save = {'trajs': df["trajs"].to_list(), "sorted_index": sorted_index.tolist(), 'origin_trajs': origin_trajs}
     if full:
         dict_save["dis_matrix"] = dis_matrix.tolist()
-    json.dump(dict_save, open(file_path + "_dataset.json", "w"))
+        json.dump(dict_save, open(file_path + "_dataset_full.json", "w"))
+    else:
+        json.dump(dict_save, open(file_path + "_dataset.json", "w"))
     timer.tok("save")
 
 
