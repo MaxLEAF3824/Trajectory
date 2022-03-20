@@ -47,16 +47,17 @@ def data_preprocess(file_path, dict_path, metric="edr", eps=eps_400_eu, full=Tru
 
     # filter
     t_diff_limit = 20
-    lon_lat_diff_limit = 0.005
-    df = df[
+    lon_lat_diff_limit = 0.
+    length_limit = 30
+    dff = df[
         (df["max_time_diff"] < t_diff_limit)
         & (df["max_lon_diff"] + df["max_lat_diff"] < lon_lat_diff_limit)
-        & (df["len"] > 10)]
-    print(f"剩{len(df)}/{len(df)}条，筛掉{round(100 - 100 * len(df) / len(df))}%")
+        & (df["len"] > length_limit)]
+    print(f"剩{len(dff)}/{len(df)}条，筛掉{round(100 - 100 * len(dff) / len(df))}%")
 
     time.sleep(1)
     # calculate distance
-    origin_trajs = df["origin_trajs"].to_list()
+    origin_trajs = dff["origin_trajs"].to_list()
     arr = [np.array(origin_traj) for origin_traj in origin_trajs]
     length = len(arr)
     dis_matrix = np.zeros((length, length))
@@ -76,7 +77,7 @@ def data_preprocess(file_path, dict_path, metric="edr", eps=eps_400_eu, full=Tru
     else:
         raiseExceptions("metric {} is not supported".format(metric))
     sorted_index = np.argsort(dis_matrix, axis=1)
-    dict_save = {'trajs': df["trajs"].to_list(), "sorted_index": sorted_index.tolist(), 'origin_trajs': origin_trajs}
+    dict_save = {'trajs': dff["trajs"].to_list(), "sorted_index": sorted_index.tolist(), 'origin_trajs': origin_trajs}
     if full:
         dict_save["dis_matrix"] = dis_matrix.tolist()
         json.dump(dict_save, open(file_path + "_dataset_full.json", "w"))
