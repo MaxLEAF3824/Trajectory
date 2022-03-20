@@ -7,6 +7,7 @@ import traj_dist.distance as tdist
 from logging import raiseExceptions
 from args import *
 import numpy as np
+import time
 
 timer = Timer()
 
@@ -50,9 +51,10 @@ def data_preprocess(file_path, dict_path, metric="edr", eps=eps_400_eu, full=Tru
     df = df[
         (df["max_time_diff"] < t_diff_limit)
         & (df["max_lon_diff"] + df["max_lat_diff"] < lon_lat_diff_limit)
-        ]
+        & (df["len"] > 10)]
     print(f"剩{len(df)}/{len(df)}条，筛掉{round(100 - 100 * len(df) / len(df))}%")
 
+    time.sleep(1)
     # calculate distance
     origin_trajs = df["origin_trajs"].to_list()
     arr = [np.array(origin_traj) for origin_traj in origin_trajs]
@@ -77,7 +79,9 @@ def data_preprocess(file_path, dict_path, metric="edr", eps=eps_400_eu, full=Tru
     dict_save = {'trajs': df["trajs"].to_list(), "sorted_index": sorted_index.tolist(), 'origin_trajs': origin_trajs}
     if full:
         dict_save["dis_matrix"] = dis_matrix.tolist()
-    json.dump(dict_save, open(file_path + "_dataset.json", "w"))
+        json.dump(dict_save, open(file_path + "_dataset_full.json", "w"))
+    else:
+        json.dump(dict_save, open(file_path + "_dataset.json", "w"))
     timer.tok("save")
 
 
