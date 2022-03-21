@@ -91,14 +91,14 @@ class T3S(nn.Module):
             dis_pos.device)  # [triplet_num]
         dis_pos = torch.einsum("bt, t -> b", dis_pos, weight_pos)  # [bsz]
         dis_neg = dis_neg.mean(dim=1)  # [bsz]
-        loss = 1 - dis_pos + dis_neg
+        loss = dis_pos - dis_neg + 1
         return torch.mean(loss)
 
     def pair_similarity(self, trajs):
         out = self.forward(trajs)  # [bsz, emb]
         norm = torch.norm(out.unsqueeze(1) - out, dim=2, p=2)  # [bsz, bsz]
-        sim_matrix = torch.exp(-norm / (2 * self.beta))
-        return sim_matrix
+        # sim_matrix = torch.exp()
+        return -norm
 
     def evaluate(self, test_loader):
         self.eval()
