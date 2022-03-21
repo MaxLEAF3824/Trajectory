@@ -5,14 +5,14 @@ from traj2grid import Traj2Grid
 import json
 import traj_dist.distance as tdist
 from logging import raiseExceptions
-from args import *
+from parameters import *
 import numpy as np
 import time
 
 timer = Timer()
 
 
-def data_preprocess(file_path, dict_path, metric="edr", eps=eps_400_eu, full=True):
+def generate_dataset(file_path, dict_path, metric="edr", eps=eps_400_eu, full=True):
     # read data
     timer.tik()
     df = pd.DataFrame(pd.read_csv(file_path, header=None))
@@ -88,4 +88,4 @@ def data_preprocess(file_path, dict_path, metric="edr", eps=eps_400_eu, full=Tru
 
 if __name__ == "__main__":
     # copy_file("data/full/gps_20161102",100_000)
-    data_preprocess("data/1m_gps_20161101", "data/str_grid2idx_400.json", full=False)
+    generate_dataset("data/1m_gps_20161101", "data/str_grid2idx_400.json", full=False)

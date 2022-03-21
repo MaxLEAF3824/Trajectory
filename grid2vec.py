@@ -7,9 +7,7 @@ import torch.nn.functional as F
 import torch
 import numpy as np
 from sklearn.neighbors import KDTree
-from scipy.spatial.distance import euclidean
 import torch.nn as nn
-import sys
 
 
 class GridEmbeddingDataset(torch.utils.data.Dataset):

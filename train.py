@@ -2,12 +2,12 @@ import argparse
 from grid2vec import *
 from t3s import *
 import utils
-
+import parameters
 
 timer = utils.Timer()
 
 parser = argparse.ArgumentParser(description="train.py")
-parser.add_argument('--model', '-m', type=str ,default='t3s', help='model name')
+parser.add_argument('--model', '-m', type=str, default='t3s', help='model name')
 parser.add_argument('--batch_size', '-b', type=int, default=64)
 parser.add_argument('--epoch_num', '-ep', type=int, default=100)
 parser.add_argument('--learning_rate', '-lr', type=float, default=1e-2)
@@ -19,6 +19,7 @@ parser.add_argument('--train_dataset', '-data_tr', type=str, default="data/1m_gp
 parser.add_argument('--validate_dataset', '-data_va', type=str, default="data/100k_gps_20161102_dataset.json")
 parser.add_argument('--pretrained_embedding', '-pre', type=str, default=None)
 parser.add_argument('--embedding_size', '-emb', type=int, default=256)
+parser.add_argument('--vocab_size', '-vocab', type=int, default=parameters.vocab_size_400)
 parser.add_argument('--window_size', '-w', type=int, default=20)
 
 args = parser.parse_args()

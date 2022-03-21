@@ -4,17 +4,14 @@ import torch
 from torch import nn
 import numpy as np
 import json
-import random
+import math
 import utils
 
 timer = utils.Timer()
 
 
 class MetricLearningDataset(torch.utils.data.Dataset):
-    def __init__(self, file_train, grid2idx, metric="edr", max_len=128, triplet_num=10, device="cpu"):
-        self.metric = metric
-        self.triplet_num = triplet_num
-        self.device = device
+    def __init__(self, file_train, device="cpu", triplet_num=10):
         self.train_dict = json.load(open(file_train))
         '''
         train_dict["trajs] : list of list of idx
@@ -22,18 +19,9 @@ class MetricLearningDataset(torch.utils.data.Dataset):
         train_dict["origin_trajs"] : list of list of (lon, lat)
         train_dict["dis_matrix"] : matrix of distance
         '''
-
-        self.data = []
-        # turn the trajectory to max_len
-        for traj in self.train_dict["trajs"]:
-            traj = np.array(traj)
-            if len(traj) > max_len:
-                idx = [0] + sorted(random.sample(range(1, len(traj) - 1), max_len - 2)) + [len(traj) - 1]
-                traj = traj[idx]
-            elif len(traj) < max_len:
-                traj = np.pad(traj, (0, max_len - len(traj)), "constant", constant_values=len(grid2idx))
-            self.data.append(traj)
-        self.data = torch.tensor(np.array(self.data), dtype=torch.long).to(device)
+        self.data = np.array([np.array(t) for t in self.train_dict['trajs']])
+        self.triplet_num = triplet_num
+        self.device = device
 
     def __len__(self):
         return len(self.data)
@@ -45,20 +33,40 @@ class MetricLearningDataset(torch.utils.data.Dataset):
         return anchor, positive, negative
 
 
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model, dropout=0.1, max_len=5000):
+        super(PositionalEncoding, self).__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0).transpose(0, 1)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        '''
+        x: [seq_len, batch_size, d_model]
+        '''
+        x = x + self.pe[:x.size(0), :]
+        return self.dropout(x)
+
+
 class T3S(nn.Module):
-    def __init__(
-            self, vocab_size, dim_emb=256, head_num=8, encoder_layer_num=1, lstm_layer_num=1, pretrained_embedding=None
-    ):
+    def __init__(self, vocab_size, dim_emb=256, heads=8, encoder_layers=1, lstm_layers=1, pre_emb=None, max_len=128):
         super(T3S, self).__init__()
         self.lamb = nn.Parameter(torch.FloatTensor(1), requires_grad=True)  # lambda
         nn.init.constant_(self.lamb, 0.5)
-        if pretrained_embedding:
-            self.embedding = nn.Embedding(vocab_size, dim_emb).from_pretrained(pretrained_embedding)
+        if pre_emb:
+            self.embedding = nn.Embedding(vocab_size, dim_emb).from_pretrained(pre_emb)
         else:
             self.embedding = nn.Embedding(vocab_size, dim_emb)
-        self.encoder_layer = nn.TransformerEncoderLayer(dim_emb, head_num)
-        self.encoder = nn.TransformerEncoder(self.encoder_layer, encoder_layer_num)
-        self.lstm = nn.LSTM(dim_emb, dim_emb, lstm_layer_num, batch_first=True)
+        self.position_coding = PositionalEncoding(dim_emb, dropout=0.1, max_len=max_len)
+        self.encoder_layer = nn.TransformerEncoderLayer(dim_emb, heads)
+        self.encoder = nn.TransformerEncoder(self.encoder_layer, encoder_layers)
+        self.lstm = nn.LSTM(dim_emb, dim_emb, lstm_layers, batch_first=True)
 
     def forward(self, x):
         """
@@ -123,7 +131,6 @@ def train_t3s(args):
     timer.tik("prepare data")
 
     # load args
-    grid2idx_file = args.grid2idx
     train_dataset = args.train_dataset
     validate_dataset = args.validate_dataset
     batch_size = args.batch_size
@@ -132,22 +139,21 @@ def train_t3s(args):
     learning_rate = args.learning_rate
     epochs = args.epoch_num
     checkpoint = args.checkpoint
+    vocab_size = args.vocab_size
     vp = args.visdom_port
 
     # prepare data
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    str_grid2idx = json.load(open(grid2idx_file))
-    grid2idx = {eval(c): str_grid2idx[c] for c in list(str_grid2idx)}
-    dataset = MetricLearningDataset(train_dataset, grid2idx, device=device)
+    dataset = MetricLearningDataset(train_dataset, device=device)
     train_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
-    test_dataset = MetricLearningDataset(validate_dataset, grid2idx, device=device)
+    test_dataset = MetricLearningDataset(validate_dataset, device=device)
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
 
     # init model
     pre_emb = None
     if pretrained_embedding_file:
         pre_emb = np.load(pretrained_embedding_file)
-    model = T3S(vocab_size=len(grid2idx) + 1, dim_emb=emb_size, pretrained_embedding=pre_emb)
+    model = T3S(vocab_size=vocab_size, dim_emb=emb_size, pre_emb=pre_emb)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     epoch_start = 0
 

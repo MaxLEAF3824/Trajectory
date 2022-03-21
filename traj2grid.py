@@ -19,7 +19,7 @@ class Traj2Grid:
         p2 = (min_lat, min_lon + (max_lon - min_lon) / n)
         self.gird_shape = (dis(p0, p1).meters, dis(p0, p2).meters)
 
-    def convert2d_point(self, point):
+    def point2grid(self, point):
         # point : (lon, lat)
         return (
             int((point[0] - self.min_lon) // self.l),
@@ -38,13 +38,10 @@ class Traj2Grid:
 
     def convert1d(self, traj):
         traj_1d = []
-        if not self.grid2idx:
-            print("vocab is not built.")
-            return traj_1d
         for p in traj:
-            grid = self.convert2d_point(p)
-            if self.grid2idx.get(grid):
-                traj_1d.append(self.grid2idx[grid])
+            idx = self.grid2idx.get(self.point2grid(p))
+            if idx and (not traj_1d or idx != traj_1d[-1]):
+                traj_1d.append(idx)
         return traj_1d
 
     def draw_grid(self, grid_count: dict, file_name="grids.png"):
@@ -71,11 +68,10 @@ def generate_grid2idx(row_num=400, column_num=400, data_dir="data/full"):
     import modin.pandas as pd
     import ray
     import json
-    from args import min_lon, min_lat, max_lon, max_lat
+    from parameters import min_lon, min_lat, max_lon, max_lat
 
     ray.init()
     timer = utils.Timer()
-    
 
     t2g = Traj2Grid(row_num, column_num, min_lon, min_lat, max_lon, max_lat)
     print(t2g.gird_shape)
@@ -88,7 +84,7 @@ def generate_grid2idx(row_num=400, column_num=400, data_dir="data/full"):
             usecols=["lon", "lat"],
         )  # lon经度 lat纬度
         timer.tok(f"read{str(i).zfill(2)}")
-        df = df.apply(t2g.convert2d_point, axis=1).squeeze()
+        df = df.apply(t2g.point2grid, axis=1).squeeze()
         timer.tok(f"apply{str(i).zfill(2)}")
         if value_counts is not None:
             value_counts = value_counts.add(df.value_counts(), fill_value=0)
@@ -99,8 +95,8 @@ def generate_grid2idx(row_num=400, column_num=400, data_dir="data/full"):
     grid2idx = t2g.build_vocab(value_counts)
     timer.tok("build_vocab")
     str_grid2idx = {f"({grid[0]},{grid[1]})": grid2idx[grid] for grid in grid2idx}
-    json.dump(str_grid2idx, open(f"data/str_grid2idx_{row_num}.json", "w"))
+    json.dump(str_grid2idx, open(f"data/str_grid2idx_{row_num}_{len(str_grid2idx)}.json", "w"))
 
 
 if __name__ == "__main__":
-    generate_grid2idx(400, 400)
+    generate_grid2idx(200, 200)
