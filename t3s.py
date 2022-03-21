@@ -7,8 +7,8 @@ import json
 import random
 import utils
 
-
 timer = utils.Timer()
+
 
 class MetricLearningDataset(torch.utils.data.Dataset):
     def __init__(self, file_train, grid2idx, metric="edr", max_len=128, triplet_num=10, device="cpu"):
@@ -22,7 +22,7 @@ class MetricLearningDataset(torch.utils.data.Dataset):
         train_dict["origin_trajs"] : list of list of (lon, lat)
         train_dict["dis_matrix"] : matrix of distance
         '''
-        
+
         self.data = []
         # turn the trajectory to max_len
         for traj in self.train_dict["trajs"]:
@@ -35,7 +35,6 @@ class MetricLearningDataset(torch.utils.data.Dataset):
             self.data.append(traj)
         self.data = torch.tensor(np.array(self.data), dtype=torch.long).to(device)
 
-
     def __len__(self):
         return len(self.data)
 
@@ -45,6 +44,7 @@ class MetricLearningDataset(torch.utils.data.Dataset):
         negative = self.data[self.train_dict['sorted_index'][idx][-self.triplet_num:]]
         return anchor, positive, negative
 
+
 class T3S(nn.Module):
     def __init__(
             self, vocab_size, dim_emb=256, head_num=8, encoder_layer_num=1, lstm_layer_num=1, pretrained_embedding=None
@@ -52,8 +52,6 @@ class T3S(nn.Module):
         super(T3S, self).__init__()
         self.lamb = nn.Parameter(torch.FloatTensor(1), requires_grad=True)  # lambda
         nn.init.constant_(self.lamb, 0.5)
-        self.beta = nn.Parameter(torch.FloatTensor(1), requires_grad=True)  # beta for RBF
-        nn.init.constant_(self.beta, 0.5)
         if pretrained_embedding:
             self.embedding = nn.Embedding(vocab_size, dim_emb).from_pretrained(pretrained_embedding)
         else:
@@ -87,21 +85,20 @@ class T3S(nn.Module):
         output_a = self.forward(anchor).unsqueeze(1).repeat(1, tri_num, 1)  # [bsz, triplet_num, emb]
         output_p = self.forward(positive).reshape(batch_size, tri_num, -1)  # [bsz, triplet_num, emb]
         output_n = self.forward(negative).reshape(batch_size, tri_num, -1)  # [bsz, triplet_num, emb]
-        sim_pos = torch.exp(-torch.norm(output_a - output_p, p=2, dim=2) / (2 * self.beta))  # [bsz, triplet_num])
-        sim_neg = torch.exp(-torch.norm(output_a - output_n, p=2, dim=2) / (2 * self.beta))  # [bsz, triplet_num])
-        weight_pos = torch.softmax(torch.ones(tri_num) / torch.arange(1, tri_num + 1).float(), dim=0).to(sim_pos.device)  # [triplet_num]
-        sim_pos = torch.einsum("bt, t -> b", sim_pos, weight_pos)  # [bsz]
-        # sim_pos = sim_pos.sum(dim=1)
-        sim_neg = sim_neg.mean(dim=1)  # [bsz]
-        loss = 1 - sim_pos + sim_neg
+        dis_pos = torch.norm(output_a - output_p, p=2, dim=2)  # [bsz, triplet_num])
+        dis_neg = torch.norm(output_a - output_n, p=2, dim=2)  # [bsz, triplet_num])
+        weight_pos = torch.softmax(torch.ones(tri_num) / torch.arange(1, tri_num + 1).float(), dim=0).to(
+            dis_pos.device)  # [triplet_num]
+        dis_pos = torch.einsum("bt, t -> b", dis_pos, weight_pos)  # [bsz]
+        dis_neg = dis_neg.mean(dim=1)  # [bsz]
+        loss = 1 - dis_pos + dis_neg
         return torch.mean(loss)
 
     def pair_similarity(self, trajs):
-        out = self.forward(trajs) # [bsz, emb]
-        norm = torch.norm(out.unsqueeze(1)-out, dim=2, p=2) # [bsz, bsz]
-        sim_matrix = torch.exp(-norm/(2*self.beta))
+        out = self.forward(trajs)  # [bsz, emb]
+        norm = torch.norm(out.unsqueeze(1) - out, dim=2, p=2)  # [bsz, bsz]
+        sim_matrix = torch.exp(-norm / (2 * self.beta))
         return sim_matrix
-        
 
     def evaluate(self, test_loader):
         self.eval()
@@ -114,7 +111,8 @@ class T3S(nn.Module):
             sim_matrix = self.pair_similarity(dataset.data).cpu().numpy()
             sorted_index = np.argsort(-sim_matrix, axis=1)
             for i in range(len(sorted_index)):
-                accs.append(len(np.intersect1d(sorted_index[i][:dataset.triplet_num], dataset[i][1].cpu().numpy())) / dataset.triplet_num)
+                accs.append(len(np.intersect1d(sorted_index[i][:dataset.triplet_num],
+                                               dataset[i][1].cpu().numpy())) / dataset.triplet_num)
         loss = np.mean(losses)
         acc = np.mean(accs)
         self.train()
@@ -123,7 +121,7 @@ class T3S(nn.Module):
 
 def train_t3s(args):
     timer.tik("prepare data")
-    
+
     # load args
     grid2idx_file = args.grid2idx
     train_dataset = args.train_dataset
@@ -135,7 +133,7 @@ def train_t3s(args):
     epochs = args.epoch_num
     checkpoint = args.checkpoint
     vp = args.visdom_port
-    
+
     # prepare data
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     str_grid2idx = json.load(open(grid2idx_file))
@@ -152,7 +150,7 @@ def train_t3s(args):
     model = T3S(vocab_size=len(grid2idx) + 1, dim_emb=emb_size, pretrained_embedding=pre_emb)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     epoch_start = 0
-    
+
     # load checkpoint
     if checkpoint is not None:
         checkpoint = torch.load(checkpoint)
@@ -180,9 +178,9 @@ def train_t3s(args):
             Y=np.array([0]),
             opts=dict(title='accuracy'))
     timer.tok("prepare data")
-    
+
     # train
-    
+
     model.to(device)
     model.train()
     timer.tik("train")
@@ -202,8 +200,8 @@ def train_t3s(args):
             batch_count += 1
             if vp != 0:
                 env.line(X=list(range(batch_count)), Y=train_loss_list, win=pane1)
-                env.line(X=list(range(epoch+1)), Y=validate_loss_list, win=pane2)
-                env.line(X=list(range(epoch+1)), Y=acc_list, win=pane3)
+                env.line(X=list(range(epoch + 1)), Y=validate_loss_list, win=pane2)
+                env.line(X=list(range(epoch + 1)), Y=acc_list, win=pane3)
         if epoch % 1 == 0:
             validate_loss, acc = model.evaluate(test_loader, device)
             validate_loss_list.append(validate_loss)
@@ -211,4 +209,5 @@ def train_t3s(args):
             timer.tok(f"epoch:{epoch} batch:{batch_idx} validate loss:{validate_loss:.4f} acc:{acc:.4f}")
         if epoch % 10 == 1:
             checkpoint = {'model': model.state_dict(), 'optihmizer': optimizer.state_dict(), 'epoch': epoch}
-            torch.save(checkpoint, f'model/checkpoint_{epoch}_loss{round(float(loss), 3)}_acc_{round(float(acc), 3)}.pth')
+            torch.save(checkpoint,
+                       f'model/checkpoint_{epoch}_loss{round(float(loss), 3)}_acc_{round(float(acc), 3)}.pth')

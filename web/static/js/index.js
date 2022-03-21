@@ -26,10 +26,7 @@ var app = new Vue({
                 strokeColor: "#fa4141",
                 strokeOpacity: 1,
                 strokeWeight: 6,
-                // 线样式还支持 'dashed'
                 strokeStyle: "solid",
-                // strokeStyle是dashed时有效
-                // strokeDasharray: [10, 5],
             })
         },
         query() {
@@ -64,20 +61,41 @@ var app = new Vue({
         },
         drawResult() {
             this.map.clearMap();
+            var idx = 0;
             this.result_trajs.forEach(function (traj) {
+                idx += 1;
                 var sim = traj.sim
                 var polyline = new AMap.Polyline({
                     map: app.map,
                     path: traj.data,
-                    strokeColor: "#0037ff", //线颜色
+                    strokeColor: "#36c5bb", //线颜色
                     strokeOpacity: 1,
-                    strokeWeight: 6,
-                    // 线样式还支持 'dashed'
+                    strokeWeight: 4,
                     strokeStyle: "solid",
-                    // strokeStyle是dashed时有效
-                    // strokeDasharray: [10, 5],
+                });
+                var start_marker = new AMap.Marker({
+                    map: app.map,
+                    position: new AMap.LngLat(traj.data[0][0], traj.data[0][1]),   // 经纬度对象，也可以是经纬度构成的一维数组[116.39, 39.9]
+                    title: '起点' + idx,
+                });
+                var end_marker = new AMap.Marker({
+                    map: app.map,
+                    position: new AMap.LngLat(traj.data[traj.data.length - 1][0], traj.data[traj.data.length - 1][1]),   // 经纬度对象，也可以是经纬度构成的一维数组[116.39, 39.9]
+                    title: '终点' + idx,
+                });
+                start_marker.on('click', function (e) {
+                    end_marker
                 });
             })
+            var polyline = new AMap.Polyline({
+                map: app.map,
+                path: app.query_traj,
+                strokeColor: "#fa4141", //线颜色
+                strokeOpacity: 1,
+                strokeWeight: 6,
+                strokeStyle: "solid",
+            });
+
         },
         uploadDataset() {
             var file = $("#file")[0].files[0];

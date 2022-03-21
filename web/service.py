@@ -38,16 +38,19 @@ class Service:
         query_traj = np.array(query_traj)
 
         def cal_sim(traj_id, traj: np.array):
-            dis = tdist.edr(query_traj, traj, eps=0.000029125044420566987)
+            # dis = tdist.edr(query_traj, traj, eps=0.00029125044420566987)
+            dis = tdist.lcss(query_traj, traj, eps=0.00029125044420566987)
+            # dis = tdist.erp(query_traj, traj)
+            # dis = tdist.frechet(query_traj, traj)
             print("traj_id:", traj_id, "sim:", 1 - dis)
-            return {"id": str(traj_id), "data": traj.tolist(), "sim": dis}
+            return {"id": str(traj_id), "data": traj.tolist(), "sim": 1 - dis}
 
         result = Parallel(n_jobs=6)(delayed(cal_sim)(traj_id, traj) for traj_id, traj in all_trajs)
         print("cal sim done")
 
         # 排序
         result.sort(key=lambda x: x["sim"], reverse=True)
-        return result[:10]
+        return result[:3]
 
     def insert_trajectories(self, dataset_json_file):
         dataset = json.load(open(dataset_json_file))
