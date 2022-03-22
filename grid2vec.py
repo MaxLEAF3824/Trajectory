@@ -71,8 +71,7 @@ class Grid2Vec(nn.Module):
         return self.in_embedding.weight.data.cpu().numpy()
 
 
-def train_grid2vec(file, window_size, embedding_size, batch_size, epoch_num, learning_rate, checkpoint, pretrained,
-                   visdom_port):
+def train_grid2vec(file, window_size, embedding_size, batch_size, epoch_num, learning_rate, checkpoint, visdom_port):
     # init
     timer = utils.Timer()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -110,12 +109,12 @@ def train_grid2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
         from visdom import Visdom
         env = Visdom(port=visdom_port)
         pane1 = env.line(
-            X=np.array([]),
-            Y=np.array([]),
+            X=np.array([0]),
+            Y=np.array([0]),
             opts=dict(title='loss'))
         pane2 = env.line(
-            X=np.array([]),
-            Y=np.array([]),
+            X=np.array([0]),
+            Y=np.array([0]),
             opts=dict(title='accuracy'))
 
     # load checkpoint / pretrained_state_dict
@@ -128,8 +127,6 @@ def train_grid2vec(file, window_size, embedding_size, batch_size, epoch_num, lea
         if checkpoint.get('epoch'):
             epoch_start = checkpoint['epoch'] + 1
             last_save_epoch = epoch_start
-    elif pretrained is not None:
-        model.load_state_dict(torch.load(pretrained))
 
     # start training
     print(f'\n-------------training config-------------\n'
