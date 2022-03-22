@@ -28,10 +28,10 @@
                 <h1>相似轨迹查询</h1>
                 <div class="row">
                     <div class="col-md-4">
-                        <button class="btn" @click="drawPolyline" style="margin: 5px">绘制查询轨迹</button>
+                        <button class="btn" @click="drawPolyline" style="margin: 5px">开始绘制</button>
                     </div>
                     <div class="col-md-4">
-                        <button class="btn" @click="clearDrawTraj" style="margin: 5px">清除轨迹</button>
+                        <button class="btn" @click="clearDrawTraj" style="margin: 5px">关闭绘制</button>
                     </div>
                 </div>
                 <div class="row">
@@ -49,7 +49,12 @@
                     <div class="col-md-3">
                         <select class="form-control" id="type_select" style="margin: 5px">
                             <option value="0">高效</option>
-                            <option value="1">传统</option>
+                            <option value="1">edr</option>
+                            <option value="2">erp</option>
+                            <option value="3">lcss</option>
+                            <option value="4">frechet</option>
+                            <option value="5">hausdorff</option>
+                            <option value="6">dtw</option>
                         </select>
                     </div>
                 </div>

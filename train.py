@@ -19,7 +19,7 @@ parser.add_argument('--train_dataset', '-data_tr', type=str, default="data/1m_gp
 parser.add_argument('--validate_dataset', '-data_va', type=str, default="data/100k_gps_20161102_dataset.json")
 parser.add_argument('--pretrained_embedding', '-pre', type=str, default=None)
 parser.add_argument('--embedding_size', '-emb', type=int, default=256)
-parser.add_argument('--vocab_size', '-vocab', type=int, default=parameters.vocab_size_400)
+parser.add_argument('--vocab_size', '-vocab', type=int, default=None)
 parser.add_argument('--window_size', '-w', type=int, default=20)
 
 args = parser.parse_args()

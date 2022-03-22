@@ -1,6 +1,5 @@
-from logging import raiseExceptions
-from threading import Timer
 import torch
+import torch.utils.data as tud
 from torch import nn
 import numpy as np
 import json
@@ -11,17 +10,19 @@ timer = utils.Timer()
 
 
 class MetricLearningDataset(torch.utils.data.Dataset):
-    def __init__(self, file_train, device="cpu", triplet_num=10):
+    def __init__(self, file_train, triplet_num=10):
+        """
+        train_dict['trajs'] : list of list of idx
+        train_dict['sorted_index'] : sorted matrix of most similarity trajs
+        train_dict['origin_trajs'] : list of list of (lon, lat)
+        """
         self.train_dict = json.load(open(file_train))
-        '''
-        train_dict["trajs] : list of list of idx
-        train_dict["sorted_index] : sorted matrix of most similarity trajs
-        train_dict["origin_trajs"] : list of list of (lon, lat)
-        train_dict["dis_matrix"] : matrix of distance
-        '''
-        self.data = np.array([np.array(t) for t in self.train_dict['trajs']])
         self.triplet_num = triplet_num
-        self.device = device
+        lens = np.array([len(i) for i in self.train_dict['trajs']])
+        mask = np.arange(lens.max()) < lens[:, None]
+        self.data = np.zeros(mask.shape, dtype=np.int32)
+        self.data[mask] = np.concatenate(self.train_dict['trajs'])
+        # self.data = np.array([np.array(t) for t in self.train_dict['trajs']])
 
     def __len__(self):
         return len(self.data)
@@ -37,9 +38,8 @@ class PositionalEncoding(nn.Module):
     def __init__(self, d_model, dropout=0.1, max_len=5000):
         super(PositionalEncoding, self).__init__()
         self.dropout = nn.Dropout(p=dropout)
-
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        pe = torch.zeros(max_len, d_model)  # [max_len, d_model]
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)  # [max_len, 1]
         div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
@@ -47,10 +47,12 @@ class PositionalEncoding(nn.Module):
         self.register_buffer('pe', pe)
 
     def forward(self, x):
-        '''
-        x: [seq_len, batch_size, d_model]
-        '''
+        """
+        x: [batch_size, max_len, d_model]
+        """
+        x = x.transpose(0, 1)
         x = x + self.pe[:x.size(0), :]
+        x = x.transpose(0, 1)
         return self.dropout(x)
 
 
@@ -59,23 +61,40 @@ class T3S(nn.Module):
         super(T3S, self).__init__()
         self.lamb = nn.Parameter(torch.FloatTensor(1), requires_grad=True)  # lambda
         nn.init.constant_(self.lamb, 0.5)
-        if pre_emb:
+        self.max_len = max_len
+        if pre_emb is not None:
             self.embedding = nn.Embedding(vocab_size, dim_emb).from_pretrained(pre_emb)
         else:
             self.embedding = nn.Embedding(vocab_size, dim_emb)
-        self.position_coding = PositionalEncoding(dim_emb, dropout=0.1, max_len=max_len)
+        self.position_encoding = PositionalEncoding(dim_emb, dropout=0.1, max_len=max_len)
         self.encoder_layer = nn.TransformerEncoderLayer(dim_emb, heads)
         self.encoder = nn.TransformerEncoder(self.encoder_layer, encoder_layers)
         self.lstm = nn.LSTM(dim_emb, dim_emb, lstm_layers, batch_first=True)
+
+    def pad(self, x):
+        """
+        x: [batch_size, seq_len]
+        """
+        batch_size = x.size(0)
+        seq_len = x.size(1)
+        if seq_len < self.max_len:
+            pad_len = self.max_len - seq_len
+            x = torch.cat([x, torch.zeros(batch_size, pad_len).long().to(self.device)], dim=1)
+        elif seq_len > self.max_len:
+            index, _ = torch.randperm(seq_len)[:self.max_len].sort()
+            x = x[:, index]
+        return x
 
     def forward(self, x):
         """
         x: [batch_size, seq_len]
         """
         emb_x = self.embedding(x)  # emb_x: [batch_size, seq_len, dim_emb]
-        encoder_out = self.encoder(emb_x)  # encoder_out: [batch_size, seq_len, dim_emb]
+        emb_x = self.pad(emb_x)  # emb_x: [batch_size, max_len, dim_emb]
+        emb_x = self.position_encoding(emb_x)  # emb_x: [batch_size, max_len, dim_emb]
+        encoder_out = self.encoder(emb_x)  # encoder_out: [batch_size, max_len, dim_emb]
         encoder_out = torch.mean(encoder_out, 1)  # encoder_out: [batch_size, dim_emb]
-        lstm_out, (h_n, c_n) = self.lstm(emb_x)  # lstm_out: [batch_size, seq_len, dim_emb]
+        lstm_out, (h_n, c_n) = self.lstm(emb_x)  # lstm_out: [batch_size, max_len, dim_emb]
         lstm_out = lstm_out[:, -1, :]  # lstm_out: [batch_size, dim_emb]
         output = self.lamb * encoder_out + (1 - self.lamb) * lstm_out  # output: [batch_size, dim_emb]
         return output
@@ -95,17 +114,15 @@ class T3S(nn.Module):
         output_n = self.forward(negative).reshape(batch_size, tri_num, -1)  # [bsz, triplet_num, emb]
         dis_pos = torch.norm(output_a - output_p, p=2, dim=2)  # [bsz, triplet_num])
         dis_neg = torch.norm(output_a - output_n, p=2, dim=2)  # [bsz, triplet_num])
-        weight_pos = torch.softmax(torch.ones(tri_num) / torch.arange(1, tri_num + 1).float(), dim=0).to(
-            dis_pos.device)  # [triplet_num]
-        dis_pos = torch.einsum("bt, t -> b", dis_pos, weight_pos)  # [bsz]
+        weight = torch.softmax(torch.ones(tri_num) / torch.arange(1, tri_num + 1).float(), dim=0).to(dis_pos.device)
+        dis_pos = torch.einsum("bt, t -> b", dis_pos, weight)  # [bsz]
         dis_neg = dis_neg.mean(dim=1)  # [bsz]
-        loss = dis_pos - dis_neg + 1
+        loss = torch.sigmoid(dis_pos) - torch.sigmoid(dis_neg) + 1
         return torch.mean(loss)
 
     def pair_similarity(self, trajs):
         out = self.forward(trajs)  # [bsz, emb]
         norm = torch.norm(out.unsqueeze(1) - out, dim=2, p=2)  # [bsz, bsz]
-        # sim_matrix = torch.exp()
         return -norm
 
     def evaluate(self, test_loader):
@@ -144,17 +161,19 @@ def train_t3s(args):
 
     # prepare data
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    dataset = MetricLearningDataset(train_dataset, device=device)
-    train_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
-    test_dataset = MetricLearningDataset(validate_dataset, device=device)
-    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
+    dataset = MetricLearningDataset(train_dataset)
+    train_loader = tud.DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    test_dataset = MetricLearningDataset(validate_dataset)
+    test_loader = tud.DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
 
     # init model
     pre_emb = None
     if pretrained_embedding_file:
-        pre_emb = np.load(pretrained_embedding_file)
+        pre_emb = torch.FloatTensor(np.load(pretrained_embedding_file))
     model = T3S(vocab_size=vocab_size, dim_emb=emb_size, pre_emb=pre_emb)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    model.to(device)
+    model.train()
     epoch_start = 0
 
     # load checkpoint
@@ -186,16 +205,12 @@ def train_t3s(args):
     timer.tok("prepare data")
 
     # train
-
-    model.to(device)
-    model.train()
     timer.tik("train")
     batch_count = 0
     train_loss_list = []
     validate_loss_list = [0]
     acc_list = [0]
     for epoch in range(epoch_start, epochs):
-        # train
         for batch_idx, (anchor, positive, negative) in enumerate(train_loader):
             loss = model.calculate_loss(anchor, positive, negative)
             optimizer.zero_grad()

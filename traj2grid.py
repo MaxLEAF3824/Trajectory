@@ -28,9 +28,11 @@ class Traj2Grid:
 
     def build_vocab(self, grid_count: dict, lower_bound=1):
         self.grid2idx.clear()
-        for idx, grid in enumerate(grid_count):
+        idx = 0
+        for grid in grid_count:
             if grid_count[grid] >= lower_bound:
                 self.grid2idx[grid] = idx
+                idx += 1
         return self.grid2idx
 
     def set_vocab(self, grid2idx):
@@ -64,22 +66,15 @@ class Traj2Grid:
         img.save(file_name)
 
 
-def generate_grid2idx(row_num=400, column_num=400, data_dir="data/full"):
-    import modin.pandas as pd
-    import ray
-    import json
-    from parameters import min_lon, min_lat, max_lon, max_lat
-
-    ray.init()
+def generate_grid2idx(row_num=400, column_num=400, lower_bound=10):
     timer = utils.Timer()
-
     t2g = Traj2Grid(row_num, column_num, min_lon, min_lat, max_lon, max_lat)
     print(t2g.gird_shape)
     timer.tik()
     value_counts = None
     for i in range(1, 31):
         df = pd.read_csv(
-            f"{data_dir}/gps_201611{str(i).zfill(2)}",
+            f"data/full/gps_201611{str(i).zfill(2)}",
             names=["name", "order_id", "time", "lon", "lat"],
             usecols=["lon", "lat"],
         )  # lon经度 lat纬度
@@ -92,11 +87,18 @@ def generate_grid2idx(row_num=400, column_num=400, data_dir="data/full"):
             value_counts = df.value_counts()
         timer.tok(f"value_counts{str(i).zfill(2)}")
     value_counts = value_counts.to_dict()
-    grid2idx = t2g.build_vocab(value_counts)
+    grid2idx = t2g.build_vocab(value_counts, lower_bound=lower_bound)
     timer.tok("build_vocab")
     str_grid2idx = {f"({grid[0]},{grid[1]})": grid2idx[grid] for grid in grid2idx}
     json.dump(str_grid2idx, open(f"data/str_grid2idx_{row_num}_{len(str_grid2idx)}.json", "w"))
 
 
 if __name__ == "__main__":
-    generate_grid2idx(200, 200)
+    import modin.pandas as pd
+    import ray
+    import json
+    from parameters import min_lon, min_lat, max_lon, max_lat
+
+    ray.init()
+    for i in [400,300,200]:
+        generate_grid2idx(i, i)
