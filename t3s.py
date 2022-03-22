@@ -9,7 +9,7 @@ import utils
 timer = utils.Timer()
 
 
-class MetricLearningDataset(torch.utils.data.Dataset):
+class MetricLearningDataset(tud.Dataset):
     def __init__(self, file_train, triplet_num=10):
         """
         train_dict['trajs'] : list of list of idx
