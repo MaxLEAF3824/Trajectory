@@ -6,7 +6,6 @@ import traj_dist.distance as tdist
 from mapper import Mapper
 from model import Trajectory, OriginalTrajectoryPoint
 import json
-import utils
 
 
 class Service:

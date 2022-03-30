@@ -6,8 +6,8 @@ from model import Trajectory, OriginalTrajectoryPoint
 
 
 class Mapper:
-    def __init__(self):
-        self.engine = create_engine("mysql+mysqldb://root:admin@localhost:3306/trajectory", echo=True, future=True)
+    def __init__(self, db_path="yqguo:guoyiqiu@202.117.43.251:3306/trajectory"):
+        self.engine = create_engine(f"mysql+mysqldb://{db_path}", echo=True, future=True)
 
     def insert_trajectories(self, trajectories: List[Trajectory]):
         session = Session(self.engine)
