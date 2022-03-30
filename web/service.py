@@ -24,7 +24,7 @@ class Service:
         return result
 
     # 传统算法
-    def query_traditional(self, query_traj, query_type="discret_frechet", k=5):
+    def query_traditional(self, query_traj, query_type="discret_frechet", k=10):
         """
         :param k: int, k近邻
         :param query_type: str, 查询类型
@@ -48,7 +48,7 @@ class Service:
                 dis = metric_func(query_traj, traj, g=np.zeros(2, dtype=float))
             else:
                 dis = metric_func(query_traj, traj)
-            return {"id": str(traj_id), "data": traj.tolist(), "sim": 1 - dis}
+            return {"id": str(traj_id), "data": traj.tolist(), "length": len(traj), "sim": 1 - dis}
 
         # 并行计算
         result = Parallel(n_jobs=6)(delayed(cal_sim)(traj_id, traj) for traj_id, traj in all_trajs)
@@ -71,3 +71,9 @@ class Service:
                 spherical_points=str(dataset['origin_trajs'][idx]),
             ))
         return self.mapper.insert_trajectories(trajectories)
+
+    def get_traj_by_id(self, traj_id):
+        traj = self.mapper.get_trajectory_by_id(traj_id)
+        if not traj:
+            return None
+        return traj

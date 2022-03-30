@@ -12,76 +12,105 @@
     <!--引入高德-->
     <script src='https://webapi.amap.com/maps?v=2.0&key=40e1b1b390aec4f92032a58a9cde83ae&plugin=AMap.MouseTool'></script>
     <!-- 最新版本的 Bootstrap 核心 CSS 文件 -->
-    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/3.4.1/css/bootstrap.min.css"
-          integrity="sha384-HSMxcRTRxnN+Bdg0JdbxYKrThecOKuH5zCYotlSAcp1+c8xmyTe9GYg1l9a69psu" crossorigin="anonymous">
+    <!--    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/3.4.1/css/bootstrap.min.css"-->
+    <!--          integrity="sha384-HSMxcRTRxnN+Bdg0JdbxYKrThecOKuH5zCYotlSAcp1+c8xmyTe9GYg1l9a69psu" crossorigin="anonymous">-->
     <!-- 最新的 Bootstrap 核心 JavaScript 文件 -->
-    <script src="https://stackpath.bootstrapcdn.com/bootstrap/3.4.1/js/bootstrap.min.js"
-            integrity="sha384-aJ21OjlMXNL5UyIl/XNwTMqvzeRMZH2w8c5cRVpzpU8Y5bApTppSuUkhZXN0VxHd"
-            crossorigin="anonymous"></script>
+    <!--    <script src="https://stackpath.bootstrapcdn.com/bootstrap/3.4.1/js/bootstrap.min.js"-->
+    <!--            integrity="sha384-aJ21OjlMXNL5UyIl/XNwTMqvzeRMZH2w8c5cRVpzpU8Y5bApTppSuUkhZXN0VxHd"-->
+    <!--            crossorigin="anonymous"></script>-->
+    <!-- 引入样式 -->
+    <link rel="stylesheet" href="https://unpkg.com/element-ui/lib/theme-chalk/index.css">
+    <!-- 引入组件库 -->
+    <script src="https://unpkg.com/element-ui/lib/index.js"></script>
 
 </head>
 <body>
 <div id="app">
     <div class="container-fluid">
-        <div class="row">
-            <div class="col-md-3" style="marigin: 20px #000fff;">
-                <h1>相似轨迹查询</h1>
-                <div class="row">
-                    <div class="col-md-4">
-                        <button class="btn" @click="drawPolyline()" style="margin: 5px">开始绘制</button>
-                    </div>
-                    <div class="col-md-4">
-                        <button class="btn" @click="clearDrawTraj" style="margin: 5px">关闭绘制</button>
-                    </div>
-                </div>
-                <div class="row">
-                    <div class="col-md-4">
-                        <button class="btn" @click="uploadDataset" style="margin: 5px">批量导入轨迹</button>
-                    </div>
-                    <div class="col-md-4">
-                        <input type="file" id="file" style="margin: 5px">
-                    </div>
-                </div>
-                <div class="row">
-                    <div class="col-md-4">
-                        <button class="btn btn-success" @click="query()" style="margin: 5px">查询相似轨迹</button>
-                    </div>
-                    <div class="col-md-5">
-                        <select class="form-control" id="type_select" style="margin: 5px">
-                            <option value="efficient">高效</option>
-                            <option value="edr">edr</option>
-                            <option value="erp">erp</option>
-                            <option value="lcss">lcss</option>
-                            <option value="frechet">frechet</option>
-                            <option value="discret_frechet">discret_frechet</option>
-                            <option value="hausdorff">hausdorff</option>
-                            <option value="sspd">sspd</option>
-                        </select>
-                    </div>
-                </div>
-                <h3>查询结果</h3>
-                <table class="table table-hover">
-                    <thead>
-                    <tr>
-                        <th>#</th>
-                        <th>id</th>
-                        <th>相似度</th>
-                    </tr>
-                    </thead>
-                    <tbody>
-                    <tr v-for="(item,index) in result_trajs">
-                        <td>{{ index +1 }}</td>
-                        <td>{{ item.id }}</td>
-                        <td>{{ item.sim }}</td>
-                    </tr>
-                    </tbody>
-                </table>
-            </div>
-            <div class="col-md-9">
-                <div id="container" style="height:960px;"></div>
-            </div>
-        </div>
+
     </div>
+    <el-row>
+        <el-col :span="6" style="marigin: 20px #000fff;">
+            <h1>相似轨迹查询</h1>
+            <el-row>
+                <el-col :span="8">
+                    <el-button class="btn" @click="drawPolyline()" style="margin: 5px">开始绘制</el-button>
+                </el-col>
+                <el-col :span="8">
+                    <el-button class="btn" @click="clearDrawTraj" style="margin: 5px">关闭绘制</el-button>
+                </el-col>
+            </el-row>
+            <el-row>
+                <el-col :span="8">
+                    <el-button class="btn" @click="uploadDataset" style="margin: 5px">批量导入轨迹</el-button>
+                </el-col>
+                <el-col :span="8">
+                    <input type="file" id="file" style="margin: 5px">
+                </el-col>
+            </el-row>
+            <el-row>
+                <el-col :span="8">
+                    <el-button class="btn btn-success" @click="query()" style="margin: 5px">查询相似轨迹</el-button>
+                </el-col>
+                <el-col :span="10">
+                    <template>
+                        <el-select v-model="value" id="type_select" placeholder="请选择">
+                            <el-option
+                                    v-for="item in select_options"
+                                    :key="item.value"
+                                    :label="item.label"
+                                    :value="item.value">
+                            </el-option>
+                        </el-select>
+                    </template>
+                </el-col>
+            </el-row>
+            <el-row>
+                <el-col :span="8">
+                    <el-input v-model="input_id" placeholder="请输入内容"></el-input>
+                </el-col>
+                <el-col :span="8">
+                    <el-button class="btn btn-success" @click="query_by_traj_id()" style="margin: 5px">根据id查询
+                    </el-button>
+                </el-col>
+            </el-row>
+            <h3>查询结果</h3>
+            <template>
+                <el-table
+                        :data="result_trajs"
+                        stripe
+                        v-loading="loading"
+                        style="width: 100%">
+                    <el-table-column
+                            prop="id"
+                            label="id"
+                            width="80">
+                    </el-table-column>
+                    <el-table-column
+                            prop="sim"
+                            label="sim"
+                            width="200">
+                    </el-table-column>
+                    <el-table-column
+                            prop="length"
+                            label="length"
+                            width="100">
+                    </el-table-column>
+                    <el-table-column label="操作">
+                        <template slot-scope="scope">
+                            <el-button
+                                    size="mini"
+                                    @click="handleHighlight(scope.$index, scope.row)">强调
+                            </el-button>
+                        </template>
+                    </el-table-column>
+                </el-table>
+            </template>
+        </el-col>
+        <el-col :span="18">
+            <div id="container" style="height:960px;"></div>
+        </el-col>
+    </el-row>
 </div>
 
 <script src="../static/js/index.js"></script>

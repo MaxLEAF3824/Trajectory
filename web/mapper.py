@@ -18,3 +18,7 @@ class Mapper:
     def get_trajectories_all(self) -> List[Trajectory]:
         session = Session(self.engine)
         return session.query(Trajectory).all()
+
+    def get_trajectory_by_id(self, traj_id):
+        session = Session(self.engine)
+        return session.query(Trajectory).filter(Trajectory.id == traj_id).first()

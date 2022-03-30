@@ -11,7 +11,7 @@
  Target Server Version : 50651
  File Encoding         : 65001
 
- Date: 20/03/2022 15:47:27
+ Date: 30/03/2022 15:44:06
 */
 
 SET NAMES utf8mb4;
@@ -39,6 +39,6 @@ CREATE TABLE `trajectory`  (
   `discrete_points` text CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
   `spherical_points` text CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
   PRIMARY KEY (`id`) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 5451 CHARACTER SET = utf8 COLLATE = utf8_general_ci ROW_FORMAT = Compact;
+) ENGINE = InnoDB AUTO_INCREMENT = 9159 CHARACTER SET = utf8 COLLATE = utf8_general_ci ROW_FORMAT = Compact;
 
 SET FOREIGN_KEY_CHECKS = 1;

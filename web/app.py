@@ -30,6 +30,19 @@ def query():
     return jsonify({"code": 200, "success": True, "result": result, "msg": "查询成功"})
 
 
+@app.route('/query_by_traj_id', methods=['GET', 'POST'])
+def query_by_traj_id():
+    traj_id = int(request.form.get("traj_id"))
+    query_type = request.form.get("type")
+    query_traj = service.get_traj_by_id(traj_id)
+    query_traj = eval(query_traj.spherical_points)
+    if query_type == "efficient":
+        result = service.query_efficient(query_traj)
+    else:
+        result = service.query_traditional(query_traj, query_type)
+    return jsonify({"code": 200, "success": True, "result": result, "msg": "查询成功"})
+
+
 @app.route('/upload', methods=['POST'])
 def upload_dataset():
     json_file = request.files.get("file")

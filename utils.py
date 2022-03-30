@@ -24,15 +24,16 @@ class Timer:
         self.start = "tik"
         self.bgt = time.time()
 
-    def tik(self, str="tik"):
+    def tik(self, info="tik"):
         self.bgt = time.time()
-        self.start = str
-        print(f"{str} start")
+        self.start = info
+        print(f"{info} start")
 
-    def tok(self, str=""):
-        if not str:
-            str = self.start
-        print(f"{str} done, {round(time.time() - self.bgt, 3)}s after {self.start} start")
+    def tok(self, info=""):
+        if not info:
+            info = self.start
+        print(f"{info} done, {round(time.time() - self.bgt, 3)}s after {self.start} start")
+        return time.time() - self.bgt
 
     def now(self):
         return time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime())
