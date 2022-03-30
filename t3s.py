@@ -1,4 +1,6 @@
 from lib2to3.pytree import NegatedPattern
+from this import d
+from turtle import distance
 import torch
 import torch.utils.data as tud
 import torch.nn.utils.rnn as rnn_utils
@@ -8,7 +10,7 @@ import json
 import math
 import utils
 import random
-
+from pytorch_metric_learning import losses, distances 
 
 timer = utils.Timer()
 
@@ -35,13 +37,14 @@ class MetricLearningDataset(tud.Dataset):
             positive_idx.remove(idx)
         else:
             positive_idx = positive_idx[:self.triplet_num]
+        positive_idx = random.sample(positive_idx, 1)
         positive = self.trajs[positive_idx]
         negative_idx = self.train_dict['sorted_index'][idx][-self.triplet_num:]
         negative = self.trajs[negative_idx]
         trajs_a = self.original_traj[idx]
         trajs_p = self.original_traj[positive_idx]
         trajs_n = self.original_traj[negative_idx]
-        return anchor, positive, negative, trajs_a, trajs_p, trajs_n
+        return anchor, positive, negative, trajs_a, trajs_p, trajs_n, idx, positive_idx, negative_idx
 
 
 class PositionalEncoding(nn.Module):
@@ -80,72 +83,84 @@ class T3S(nn.Module):
         self.encoder_layer = nn.TransformerEncoderLayer(dim_emb, heads)
         self.encoder = nn.TransformerEncoder(self.encoder_layer, encoder_layers)
         self.lstm = nn.LSTM(2, dim_emb, lstm_layers, batch_first=True)
+        self.dis_func = distances.LpDistance(p=2)
+        self.loss_func = losses.NPairsLoss(distance=self.dis_func)
 
     def forward(self, x, trajs, trajs_lens):
         """
         x: [batch_size, seq_len]
         trajs: [batch_size, seq_len, 2]
         """
-        mask_x = torch.tensor((x != -1), device=x.device).logical_not()  # [batch_size, seq_len]
+        # transformer embedding
+        mask_x = (x == -1)  # [batch_size, seq_len]
         x.clamp_min_(0)
         emb_x = self.embedding(x)  # emb_x: [batch_size, seq_len, dim_emb]
         emb_x[mask_x] = 0
-        # emb_x: [batch_size, max_len, dim_emb]
         emb_x = self.position_encoding(emb_x)
-        # encoder_out: [batch_size, max_len, dim_emb]
-        encoder_out = self.encoder(emb_x)
-        # encoder_out: [batch_size, dim_emb]
-        encoder_out = torch.mean(encoder_out, 1)
-        # lstm_out: [batch_size, max_len, dim_emb]
+        encoder_out = self.encoder(emb_x) # [batch_size, seq_len, dim_emb]
+        encoder_out = torch.mean(encoder_out, 1) # batch_size, dim_emb]
+        # lstm embedding
         trajs = rnn_utils.pack_padded_sequence(trajs, trajs_lens, batch_first=True, enforce_sorted=False)
         lstm_out, (h_n, c_n) = self.lstm(trajs)
         lstm_out, out_len = rnn_utils.pad_packed_sequence(lstm_out, batch_first=True)
         out_len = out_len.to(lstm_out.device)
         lstm_out = lstm_out.index_select(1, out_len - 1)
+        lstm_out = lstm_out.diagonal(dim1=0, dim2=1).transpose(0, 1)
+        # 相加
+        output = encoder_out
         output = self.lamb * encoder_out + (1 - self.lamb) * lstm_out  # output: [batch_size, dim_emb]
         return output
 
     def calculate_loss(self, anchor, anchor_lens, pos, pos_lens, neg, neg_lens,
-                       trajs_a, trajs_a_lens, trajs_p, trajs_p_lens, trajs_n, trajs_n_lens):
+                       trajs_a, trajs_a_lens, trajs_p, trajs_p_lens, trajs_n, trajs_n_lens,
+                       anchor_idxs, pos_idxs, neg_idxs):
         """
         anchor: [batch_size, seq_len]
-        pos: [batch_size * triplet_num, seq_len]
+        pos: [batch_size, seq_len]
         neg: [batch_size * triplet_num, seq_len]
         """
-        tri_num = pos.shape[0]//anchor.shape[0]
+        batch_size = anchor.size(0)
+        # tri_num = neg.shape[0] // batch_size
         output_a = self.forward(anchor, trajs_a, trajs_a_lens)
         output_p = self.forward(pos, trajs_p, trajs_p_lens)
-        output_n = self.forward(neg, trajs_n, trajs_n_lens)
-        # [bsz, triplet_num])
-        dis_pos = torch.norm(output_a - output_p, p=2, dim=2)
-        # [bsz, triplet_num])
-        dis_neg = torch.norm(output_a - output_n, p=2, dim=2)
-        weight = torch.softmax(torch.ones(tri_num) / torch.arange(1, tri_num + 1).float(), dim=0).to(dis_pos.device)
-        dis_pos = torch.einsum("bt, t -> b", dis_pos, weight)  # [bsz]
-        dis_neg = dis_neg.mean(dim=1)  # [bsz]
-        loss = dis_pos - dis_neg
-        return torch.mean(loss)
+        # output_n = self.forward(neg, trajs_n, trajs_n_lens)
+        embeddings = torch.cat([output_a, output_p], dim=0)  # [batch_size * (tri_num+2), dim_emb]
+        labels = anchor_idxs.repeat(2).to(embeddings.device)
+        loss = self.loss_func(embeddings, labels)
+        return loss
+            
+    def pair_similarity(self, a, trajs_a, trajs_a_lens):
+        output_a = self.forward(a, trajs_a, trajs_a_lens)
+        sim_matrix = self.dis_func(output_a)
+        return sim_matrix
 
-    def pair_similarity(self, trajs):
-        out = self.forward(trajs)  # [bsz, emb]
-        norm = torch.norm(out.unsqueeze(1) - out, dim=2, p=2)  # [bsz, bsz]
-        return -norm
-
-    def evaluate(self, test_loader):
+    def evaluate(self, test_loader, device):
         self.eval()
         dataset = test_loader.dataset
         losses = []
         accs = []
         with torch.no_grad():
-            for anchor, positive, negative in test_loader:
-                losses.append(self.calculate_loss(anchor, positive, negative).item())
-            sim_matrix = self.pair_similarity(dataset.data).cpu().numpy()
-            sorted_index = np.argsort(-sim_matrix, axis=1)
-            for i in range(len(sorted_index)):
-                accs.append(len(np.intersect1d(sorted_index[i][:dataset.triplet_num],
-                                               dataset[i][1].cpu().numpy())) / dataset.triplet_num)
+            for (anchor, anchor_lens, pos, pos_lens, neg, neg_lens,
+                 trajs_a, trajs_a_lens, trajs_p, trajs_p_lens, trajs_n, trajs_n_lens,
+                 anchor_idxs, pos_idxs, neg_idxs) in test_loader:
+                anchor = anchor.to(device)
+                pos = pos.to(device)
+                # neg = neg.to(device)
+                trajs_a = trajs_a.to(device)
+                trajs_p = trajs_p.to(device)
+                trajs_n = trajs_n.to(device)
+                losses.append(self.calculate_loss(anchor, anchor_lens, pos, pos_lens, neg, neg_lens,
+                                                  trajs_a, trajs_a_lens, trajs_p, trajs_p_lens, trajs_n, trajs_n_lens,
+                                                  anchor_idxs, pos_idxs, neg_idxs).item())
+            trajs = dataset.trajs
+            # sim_matrix = self.pair_similarity(trajs).cpu().numpy()
+            # sorted_index = np.argsort(-sim_matrix, axis=1)
+            # for i in range(len(sorted_index)):
+                # accs.append(len(np.intersect1d(sorted_index[i][:dataset.triplet_num],
+                                            #    dataset[i][1].cpu().numpy())) / dataset.triplet_num)
         loss = np.mean(losses)
-        acc = np.mean(accs)
+        # acc = np.mean(accs)
+        acc = 0
         self.train()
         return loss, acc
 
@@ -181,7 +196,6 @@ def train_t3s(args):
         pos = [torch.tensor(pos_) for pos_ in pos]
         pos_lens = [len(pos_) for pos_ in pos]
         pos = rnn_utils.pad_sequence(pos, batch_first=True, padding_value=-1)
-        # pos = torch.reshape(pos, (batch_size, -1, pos.shape[1]))
 
         neg = []
         for list_neg in [list(traj[2]) for traj in train_data]:
@@ -189,7 +203,6 @@ def train_t3s(args):
         neg = [torch.tensor(neg_) for neg_ in neg]
         neg_lens = [len(neg_) for neg_ in neg]
         neg = rnn_utils.pad_sequence(neg, batch_first=True, padding_value=-1)
-        # neg = torch.reshape(neg, (batch_size, -1, neg.shape[1]))
 
         trajs_a = [torch.tensor(np.array(traj[3]), dtype=torch.float32) for traj in train_data]
         trajs_a_lens = [traj.shape[0] for traj in trajs_a]
@@ -209,7 +222,21 @@ def train_t3s(args):
         trajs_n_lens = [traj.shape[0] for traj in trajs_n]
         trajs_n = rnn_utils.pad_sequence(trajs_n, batch_first=True, padding_value=0)
 
-        return anchor, anchor_lens, pos, pos_lens, neg, neg_lens, trajs_a, trajs_a_lens, trajs_p, trajs_p_lens, trajs_n, trajs_n_lens
+        anchor_idxs = torch.tensor([traj[6] for traj in train_data], dtype=torch.long)
+
+        pos_idxs = []
+        for list_pos_idx in [list(traj[7]) for traj in train_data]:
+            pos_idxs.extend(list_pos_idx)
+        pos_idxs = torch.tensor([pos_ for pos_ in pos_idxs])
+
+        neg_idxs = []
+        for list_neg_idx in [list(traj[8]) for traj in train_data]:
+            neg_idxs.extend(list_neg_idx)
+        neg_idxs = torch.tensor([neg_ for neg_ in neg_idxs])
+
+        return anchor, anchor_lens, pos, pos_lens, neg, neg_lens, trajs_a,\
+            trajs_a_lens, trajs_p, trajs_p_lens, trajs_n, trajs_n_lens,\
+            anchor_idxs, pos_idxs, neg_idxs
 
     timer.tik("prepare data")
     dataset = MetricLearningDataset(train_dataset, triplet_num, max_len)
@@ -252,20 +279,20 @@ def train_t3s(args):
     timer.tik("train")
     batch_count = 0
     train_loss_list = []
-    validate_loss_list = [0]
-    acc_list = [0]
     for epoch in range(epoch_start, epochs):
         for batch_idx, (anchor, anchor_lens, pos, pos_lens, neg, neg_lens,
-                        trajs_a, trajs_a_lens, trajs_p, trajs_p_lens, trajs_n, trajs_n_lens) in enumerate(train_loader):
+                        trajs_a, trajs_a_lens, trajs_p, trajs_p_lens, trajs_n, trajs_n_lens,
+                        anchor_idxs, pos_idxs, neg_idxs) in enumerate(train_loader):
             anchor = anchor.to(device)
             pos = pos.to(device)
-            neg = neg.to(device)
+            # neg = neg.to(device)
             trajs_a = trajs_a.to(device)
             trajs_p = trajs_p.to(device)
             trajs_n = trajs_n.to(device)
             loss = model.calculate_loss(
                 anchor, anchor_lens, pos, pos_lens, neg, neg_lens,
-                trajs_a, trajs_a_lens, trajs_p, trajs_p_lens, trajs_n, trajs_n_lens)
+                trajs_a, trajs_a_lens, trajs_p, trajs_p_lens, trajs_n, trajs_n_lens,
+                anchor_idxs, pos_idxs, neg_idxs)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -274,19 +301,13 @@ def train_t3s(args):
             train_loss_list.append(float(loss))
             batch_count += 1
             if vp != 0:
-                env.line(X=list(range(batch_count)),
-                         Y=train_loss_list, win=pane1)
-                env.line(X=list(range(epoch + 1)),
-                         Y=validate_loss_list, win=pane2)
-                env.line(X=list(range(epoch + 1)), Y=acc_list, win=pane3)
+                env.line(X=[batch_count], Y=[loss.item()], win=pane1, update='append')
         if epoch % 1 == 0:
-            validate_loss, acc = model.evaluate(test_loader)
-            validate_loss_list.append(validate_loss)
-            acc_list.append(acc)
-            timer.tok(
-                f"epoch:{epoch} batch:{batch_idx} validate loss:{validate_loss:.4f} acc:{acc:.4f}")
-        if epoch % 10 == 1:
-            checkpoint = {'model': model.state_dict(
-            ), 'optihmizer': optimizer.state_dict(), 'epoch': epoch}
-            torch.save(checkpoint,
-                       f'model/checkpoint_{epoch}_loss{round(float(loss), 3)}_acc_{round(float(acc), 3)}.pth')
+            validate_loss, acc = model.evaluate(test_loader, device)
+            env.line(X=[epoch + 1], Y=[validate_loss], win=pane2, update='append')
+            env.line(X=[epoch + 1], Y=[acc], win=pane3, update='append')
+            timer.tok(f"epoch:{epoch} batch:{batch_idx} validate loss:{validate_loss:.4f} acc:{acc:.4f}")
+        if epoch % 10 == 5:
+            checkpoint = {'model': model.state_dict(), 'optihmizer': optimizer.state_dict(), 'epoch': epoch}
+            torch.save(
+                checkpoint, f'model/checkpoint_{epoch}_loss{round(float(loss), 3)}_acc_{round(float(acc), 3)}.pth')
