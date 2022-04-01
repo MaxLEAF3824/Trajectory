@@ -23,7 +23,7 @@ class Service:
         return result
 
     # 传统算法
-    def query_traditional(self, query_traj, query_type="discret_frechet", k=10):
+    def query_traditional(self, query_traj, query_type="discret_frechet", k=10, jobs_num=18):
         """
         :param k: int, k近邻
         :param query_type: str, 查询类型
@@ -38,6 +38,8 @@ class Service:
 
         # 查询结果
         query_traj = np.array(query_traj)
+        if not query_type:
+            query_type="discret_frechet"
         metric_func = getattr(tdist, query_type)
 
         def cal_sim(traj_id, traj: np.array):
@@ -47,10 +49,15 @@ class Service:
                 dis = metric_func(query_traj, traj, g=np.zeros(2, dtype=float))
             else:
                 dis = metric_func(query_traj, traj)
-            return {"id": str(traj_id), "data": traj.tolist(), "length": len(traj), "sim": 1 - dis}
+            print(f"traj_id:{traj_id}, dis:{dis}")
+            if query_type == "edr":
+                sim = dis
+            else:
+                sim = 1 - dis
+            return {"id": str(traj_id), "data": traj.tolist(), "length": len(traj), "sim": sim}
 
         # 并行计算
-        result = Parallel(n_jobs=6)(delayed(cal_sim)(traj_id, traj) for traj_id, traj in all_trajs)
+        result = Parallel(n_jobs=jobs_num)(delayed(cal_sim)(traj_id, traj) for traj_id, traj in all_trajs)
         print("cal sim done")
 
         # 排序

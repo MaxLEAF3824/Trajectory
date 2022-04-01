@@ -43,7 +43,6 @@ var app = new Vue({
         this.mouseTool.on("draw", function (event) {
             // event.obj.$x[0] 为折线各个点坐标的list
             app.query_traj = event.obj.$x[0]
-            console.log(app.query_traj)
             app.mouseTool.close()
         });
         this.drawBorder();
@@ -100,31 +99,29 @@ var app = new Vue({
                 title: id + '终点',
             });
             start_marker.on('click', function (e) {
-                console.log(polyline)
                 if (polyline._opts.zIndex !== 99) {
-                    console.log("click")
                     polyline.setOptions(highlight_opts)
                 } else {
-                    console.log("unclick")
                     polyline.setOptions(polyline_opts)
                 }
             });
             end_marker.on('click', function (e) {
                 if (polyline._opts.zIndex !== 99) {
-                    console.log("click")
                     polyline.setOptions(highlight_opts)
                 } else {
-                    console.log("unclick")
                     polyline.setOptions(polyline_opts)
                 }
             });
         },
         query() {
             if (this.query_traj === null) {
-                alert("query_traj为空")
+                app.$message({
+                    type: 'error',
+                    message: 'query_traj为空',
+                  });
             } else {
                 var selected_type = $("#type_select").val()
-
+                const start_time = Math.round(new Date());
                 $.ajax({
                     type: "POST",
                     url: "/query",
@@ -136,11 +133,18 @@ var app = new Vue({
                         console.log(data)
                         app.loading = false;
                         if (data.success) {
-                            console.log("查询成功");
+                            const end_time = Math.round(new Date());
+                            app.$message({
+                                type: 'success',
+                                message: '查询成功!\n耗时: ' + (end_time - start_time) + 'ms',
+                              });
                             app.result_trajs = data.result;
                             app.drawResult();
                         } else {
-                            alert("查询失败")
+                            app.$message({
+                                type: 'error',
+                                message: '查询失败',
+                              });
                         }
                     }
                 })
@@ -186,9 +190,15 @@ var app = new Vue({
                 success: function (data) {
                     console.log(data)
                     if (data.success) {
-                        alert("成功: " + data.msg);
+                        app.$message({
+                            type: 'success',
+                            message: '上传成功!',
+                          });
                     } else {
-                        alert("失败: " + data.msg);
+                        app.$message({
+                            type: 'error',
+                            message: '上传失败',
+                          });
                     }
                 }
             })
@@ -196,6 +206,7 @@ var app = new Vue({
         query_by_traj_id() {
             var traj_id = app.input_id;
             var selected_type = $("#type_select").val()
+            const start_time = Math.round(new Date());
             $.ajax({
                 type: "POST",
                 url: "/query_by_traj_id",
@@ -207,12 +218,19 @@ var app = new Vue({
                     console.log(data)
                     app.loading = false;
                     if (data.success) {
-                        console.log("查询成功");
+                        const end_time = Math.round(new Date());
+                        app.$message({
+                            type: 'success',
+                            message: '查询成功!\n耗时: ' + (end_time - start_time) + 'ms',
+                          });
                         app.result_trajs = data.result.slice(1, data.result.length);
                         app.query_traj = data.result[0].data
                         app.drawResult();
                     } else {
-                        alert("查询失败")
+                        app.$message({
+                            type: 'error',
+                            message: '查询失败',
+                          });
                     }
                 }
             })
