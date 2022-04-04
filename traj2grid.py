@@ -38,12 +38,16 @@ class Traj2Grid:
     def set_vocab(self, grid2idx):
         self.grid2idx = grid2idx
 
-    def convert1d(self, traj):
+    def convert1d(self, traj, diff=True):
         traj_1d = []
         for p in traj:
             idx = self.grid2idx.get(self.point2grid(p))
-            if idx and (not traj_1d or idx != traj_1d[-1]):
-                traj_1d.append(idx)
+            if idx:
+                if diff:
+                    if not traj_1d or idx != traj_1d[-1]:
+                        traj_1d.append(idx)
+                else:
+                    traj_1d.append(idx)
         return traj_1d
 
     def draw_grid(self, grid_count: dict, file_name="grids.png"):
