@@ -15,7 +15,7 @@ timer = utils.Timer()
 
 
 class MetricLearningDataset(tud.Dataset):
-    def __init__(self, file_train, triplet_num, negative_rate=0.2):
+    def __init__(self, file_train, triplet_num, aphla=1):
         """
         train_dict['trajs'] : list of list of idx
         train_dict['sorted_index'] : sorted matrix of most similarity trajs
@@ -24,14 +24,16 @@ class MetricLearningDataset(tud.Dataset):
         """
         self.train_dict = json.load(open(file_train))
         self.triplet_num = triplet_num
-        self.negative_num = int(negative_rate*len(self.train_dict['trajs']))
         self.dis_matrix = np.array(self.train_dict['dis_matrix'])
         self.trajs = np.array(self.train_dict["trajs"], dtype=object)
         self.original_traj = np.array(self.train_dict["origin_trajs"], dtype=object)
-
+        self.aphla = aphla
+        self.sim_matrix = np.exp(-self.aphla * self.dis_matrix) / np.sum(np.exp(-self.aphla * self.dis_matrix), axis=1, keepdims=True)
+        
     def __len__(self):
         return len(self.train_dict["trajs"])
 
+    
     def __getitem__(self, idx):
         anchor = self.trajs[idx]
         positive_idx = self.train_dict['sorted_index'][idx][:self.triplet_num+1]
@@ -39,16 +41,14 @@ class MetricLearningDataset(tud.Dataset):
             positive_idx.remove(idx)
         else:
             positive_idx = positive_idx[:self.triplet_num]
-        # positive_idx = random.sample(positive_idx, self.triplet_num)
         positive = self.trajs[positive_idx]
-        negative_idx = self.train_dict['sorted_index'][idx][-self.negative_num:]
+        negative_idx = self.train_dict['sorted_index'][idx][-self.triplet_num:]
         list.reverse(negative_idx)
-        # negative_idx = random.sample(negative_idx, self.triplet_num)
         negative = self.trajs[negative_idx]
         trajs_a = self.original_traj[idx]
         trajs_p = self.original_traj[positive_idx]
         trajs_n = self.original_traj[negative_idx]
-        return anchor, positive, negative, trajs_a, trajs_p, trajs_n, idx, positive_idx, negative_idx, self.dis_matrix[idx, positive_idx], self.dis_matrix[idx, negative_idx]
+        return anchor, positive, negative, trajs_a, trajs_p, trajs_n, idx, positive_idx, negative_idx, self.sim_matrix[idx, positive_idx], self.sim_matrix[idx, negative_idx]
 
 
 def collate_fn(train_data):
@@ -101,11 +101,11 @@ def collate_fn(train_data):
         neg_idxs.extend(list_neg_idx)
     neg_idxs = torch.tensor([neg_ for neg_ in neg_idxs])
 
-    dis_pos = torch.tensor(np.array([traj[9] for traj in train_data]), dtype=torch.float32)
-    dis_neg = torch.tensor(np.array([traj[10] for traj in train_data]), dtype=torch.float32)
+    sim_pos = torch.tensor(np.array([traj[9] for traj in train_data]), dtype=torch.float32)
+    sim_neg = torch.tensor(np.array([traj[10] for traj in train_data]), dtype=torch.float32)
     return anchor, anchor_lens, pos, pos_lens, neg, neg_lens, trajs_a,\
         trajs_a_lens, trajs_p, trajs_p_lens, trajs_n, trajs_n_lens,\
-        anchor_idxs, pos_idxs, neg_idxs, dis_pos, dis_neg
+        anchor_idxs, pos_idxs, neg_idxs, sim_pos, sim_neg
 
 
 class PositionalEncoding(nn.Module):
@@ -140,8 +140,8 @@ class T3S(nn.Module):
         else:
             self.embedding = nn.Embedding(vocab_size, emb_size)
         self.position_encoding = PositionalEncoding(emb_size, dropout=0.1, )
-        self.encoder_layer = nn.TransformerEncoderLayer(emb_size, heads, batch_first=True)
-        self.encoder = nn.TransformerEncoder(self.encoder_layer, encoder_layers)
+        self.encoder = nn.TransformerEncoder(nn.TransformerEncoderLayer(
+            emb_size, heads, batch_first=True), encoder_layers)
         self.lstm = nn.LSTM(2, emb_size, lstm_layers, batch_first=True)
 
     def forward(self, x, trajs, trajs_lens):
@@ -155,7 +155,7 @@ class T3S(nn.Module):
         x.clamp_min_(0)
         emb_x = self.embedding(x)  # emb_x: [batch_size, seq_len, dim_emb]
         pe_emb_x = self.position_encoding(emb_x)
-        # emb_x[mask_x] = 0
+        pe_emb_x[mask_x] = 0
         encoder_out = self.encoder(pe_emb_x, src_key_padding_mask=mask_x)  # [batch_size, seq_len, dim_emb]
         encoder_out_mean = torch.mean(encoder_out, 1)  # batch_size, dim_emb]
         # lstm embedding
@@ -165,61 +165,38 @@ class T3S(nn.Module):
         out_len = out_len.to(lstm_out.device)
         lstm_out = lstm_out.index_select(1, out_len - 1)
         lstm_out_last = lstm_out.diagonal(dim1=0, dim2=1).transpose(0, 1)
-        # 相加
-        # output = encoder_out_mean
+        # add
         output = self.lamb * encoder_out_mean + (1 - self.lamb) * lstm_out_last  # output: [batch_size, dim_emb]
         return output
 
     def calculate_loss(self, anchor, anchor_lens, pos, pos_lens, neg, neg_lens,
                        trajs_a, trajs_a_lens, trajs_p, trajs_p_lens, trajs_n, trajs_n_lens,
-                       anchor_idxs, pos_idxs, neg_idxs, dis_pos, dis_neg):
-        """
-        anchor: [batch_size, seq_len]
-        pos: [batch_size, seq_len]
-        neg: [batch_size * triplet_num, seq_len]
-        """
+                       anchor_idxs, pos_idxs, neg_idxs, sim_pos, sim_neg):
         batch_size = anchor.size(0)
-        loss = 0
         tri_num = neg.shape[0] // batch_size
         output_a = self.forward(anchor, trajs_a, trajs_a_lens)
         output_p = self.forward(pos, trajs_p, trajs_p_lens)
         output_n = self.forward(neg, trajs_n, trajs_n_lens)
-        # loss = self.loss_func(embeddings, labels)
-        # dis_p = torch.norm(output_a - output_p, p=2, dim=1)
-        # dis_n = torch.norm(output_a.repeat(tri_num, 1) - output_n, p=2, dim=1)
-        # loss = dis_p.mean() - dis_n.mean()
-        # embeddings = torch.cat([output_p, output_n], dim=0)  # [batch_size * (tri_num+2), dim_emb]
-        # targets = -torch.ones((tri_num*2) * batch_size, device=output_a.device)
-        # targets[:batch_size*tri_num] = 1
-        # loss = self.loss_func(output_a.repeat((tri_num *2), 1), embeddings, targets)
-        dis_p = (1 - torch.cosine_similarity(output_a.repeat(tri_num, 1), output_p, dim=1)).reshape(batch_size, -1)
-        dis_n = (1 - torch.cosine_similarity(output_a.repeat(tri_num, 1), output_n, dim=1)).reshape(batch_size, -1)
-        w_p = (torch.ones(tri_num)/torch.arange(1, tri_num+1).float()).to(output_a.device)
-        w_p = torch.softmax(w_p, dim=0)
-        loss_p = torch.sum(w_p * (dis_p - dis_pos)**2, dim=1)
-        loss_n = torch.sum(w_p * (torch.relu(dis_n - dis_neg))**2, dim=1)
+        sim_p = torch.cosine_similarity(output_a.repeat(tri_num, 1), output_p, dim=1).reshape(batch_size, -1)
+        sim_n = torch.cosine_similarity(output_a.repeat(tri_num, 1), output_n, dim=1).reshape(batch_size, -1)
+        w_p = torch.softmax(torch.ones(tri_num)/torch.arange(1, tri_num+1).float(),dim=0).to(output_a.device)
+        loss_p = torch.sum(w_p * (sim_p - sim_pos)**2, dim=1)
+        loss_n = torch.sum(w_p * (torch.relu(sim_n - sim_neg))**2, dim=1)
         loss = (loss_p + loss_n).mean()
         return loss
 
-    def evaluate(self, test_loader, device, tri_num, eval_rate=0.1):
+    def evaluate(self, test_loader, device, tri_num):
         self.eval()
-        dataset = test_loader.dataset
-        losses = []
         accs = []
-        compare_num = int(eval_rate * len(dataset))
         with torch.no_grad():
             for (anchor, anchor_lens, pos, pos_lens, neg, neg_lens,
                  trajs_a, trajs_a_lens, trajs_p, trajs_p_lens, trajs_n, trajs_n_lens,
-                 anchor_idxs, pos_idxs, neg_idxs, dis_pos, dis_neg) in test_loader:
+                 anchor_idxs, pos_idxs, neg_idxs, sim_pos, sim_neg) in test_loader:
                 test_num = 64
                 tb_anchor = anchor[:test_num].to(device)
-                # pos = pos.to(device)
-                # neg = neg.to(device)
                 tb_trajs_a = trajs_a[:test_num].to(device)
                 tb_trajs_a_lens = trajs_a_lens[:test_num]
                 tb_pos_idxs = pos_idxs[:test_num].to(device)
-                # trajs_p = trajs_p.to(device)
-                # trajs_n = trajs_n.to(device)
                 output_a = self.forward(tb_anchor, tb_trajs_a, tb_trajs_a_lens)
                 bsz = 200
                 sim_matrixs = []
@@ -237,11 +214,9 @@ class T3S(nn.Module):
                     avg_rank /= len(tb_pos_idxs[i])
                     accs.append(avg_rank)
                 break
-        loss = 0
         acc = np.mean(accs)
-        # acc = 0
         self.train()
-        return loss, acc
+        return acc
 
 
 def train_t3s(args):
@@ -252,12 +227,12 @@ def train_t3s(args):
     batch_size = args.batch_size
     pretrained_embedding_file = args.pretrained_embedding
     emb_size = args.embedding_size
-    learning_rate = args.learning_rate
+    learning_rate = args.learning_rate    
     epochs = args.epoch_num
     checkpoint = args.checkpoint
     vocab_size = args.vocab_size
     triplet_num = args.triplet_num
-    heads = args.heads
+    heads = args.headsnn
     device = torch.device(args.device)
     vp = args.visdom_port
 
@@ -304,24 +279,24 @@ def train_t3s(args):
     train_loss_list = []
     for epoch in range(epoch_start, epochs):
         if epoch % 1 == 0:
-            validate_loss, acc = model.evaluate(test_loader, device, tri_num=triplet_num)
+            acc = model.evaluate(test_loader, device, tri_num=triplet_num)
             env.line(X=[epoch + 1], Y=[acc], win=pane3, update='append')
-            timer.tok(f"epoch:{epoch} batch:{batch_idx} validate loss:{validate_loss:.4f} acc:{acc:.4f}")
+            timer.tok(f"epoch:{epoch} batch:{batch_idx} acc:{acc:.4f}")
         for batch_idx, (anchor, anchor_lens, pos, pos_lens, neg, neg_lens,
                         trajs_a, trajs_a_lens, trajs_p, trajs_p_lens, trajs_n, trajs_n_lens,
-                        anchor_idxs, pos_idxs, neg_idxs, dis_pos, dis_neg) in enumerate(train_loader):
+                        anchor_idxs, pos_idxs, neg_idxs, sim_pos, sim_neg) in enumerate(train_loader):
             anchor = anchor.to(device)
             pos = pos.to(device)
             neg = neg.to(device)
             trajs_n = trajs_n.to(device)
             trajs_a = trajs_a.to(device)
             trajs_p = trajs_p.to(device)
-            dis_pos = dis_pos.to(device)
-            dis_neg = dis_neg.to(device)
+            sim_pos = sim_pos.to(device)
+            sim_neg = sim_neg.to(device)
             loss = model.calculate_loss(
                 anchor, anchor_lens, pos, pos_lens, neg, neg_lens,
                 trajs_a, trajs_a_lens, trajs_p, trajs_p_lens, trajs_n, trajs_n_lens,
-                anchor_idxs, pos_idxs, neg_idxs, dis_pos, dis_neg)
+                anchor_idxs, pos_idxs, neg_idxs, sim_pos, sim_neg)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
