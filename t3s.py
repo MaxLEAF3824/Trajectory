@@ -56,8 +56,8 @@ class MetricLearningDataset(tud.Dataset):
         self.original_trajs = np.array(original_trajs[:self.dataset_size], dtype=object)
         self.dis_matrix = np.array(train_dict["dis_matrix"])[used_idxs, :][:, used_idxs]
         self.sorted_index = np.argsort(self.dis_matrix, axis=1)
-        a = 10
-        self.sim_matrix = np.exp(-a * self.dis_matrix) / np.sum(np.exp(-a * self.dis_matrix), axis=1, keepdims=True)
+        a = 20
+        self.sim_matrix = np.exp(-a * self.dis_matrix)
 
     def __len__(self):
         return self.dataset_size
@@ -72,14 +72,12 @@ class MetricLearningDataset(tud.Dataset):
         positive = self.trajs[positive_idx]
         negative_idx = self.sorted_index[idx][-self.triplet_num:].tolist()
         list.reverse(negative_idx)
-        negative_idx_idx = torch.multinomial(torch.tensor(self.sorted_index[idx][self.triplet_num:], dtype=torch.float), self.triplet_num)
-        negative_idx_idx = torch.sort(negative_idx_idx, descending=True).values.tolist()
-        negative_idx = self.sorted_index[idx][self.triplet_num:][negative_idx_idx]
+        negative_idx = np.random.choice(self.sorted_index[idx][self.triplet_num:], self.triplet_num).tolist()
         negative = self.trajs[negative_idx]
         trajs_a = self.original_trajs[idx]
         trajs_p = self.original_trajs[positive_idx]
         trajs_n = self.original_trajs[negative_idx]
-        return anchor, positive, negative, trajs_a, trajs_p, trajs_n, idx, positive_idx, negative_idx, self.sim_matrix[idx, positive_idx], self.sim_matrix[idx, negative_idx]
+        return anchor, positive, negative, trajs_a, trajs_p, trajs_n, idx, positive_idx, negative_idx, self.sim_matrix[idx, positive_idx], self.sim_matrix[idx, negative_idx], self.sim_matrix[idx, :]
 
 
 def collate_fn(train_data):
@@ -134,9 +132,11 @@ def collate_fn(train_data):
 
     sim_pos = torch.tensor(np.array([traj[9] for traj in train_data]), dtype=torch.float32)
     sim_neg = torch.tensor(np.array([traj[10] for traj in train_data]), dtype=torch.float32)
+    sim_matrix_a = torch.tensor(np.array([traj[11] for traj in train_data]), dtype=torch.float32)
+    sim_matrix_a = sim_matrix_a[:, anchor_idxs]
     return anchor, anchor_lens, pos, pos_lens, neg, neg_lens, trajs_a,\
         trajs_a_lens, trajs_p, trajs_p_lens, trajs_n, trajs_n_lens,\
-        anchor_idxs, pos_idxs, neg_idxs, sim_pos, sim_neg
+        anchor_idxs, pos_idxs, neg_idxs, sim_pos, sim_neg, sim_matrix_a
 
 
 class PositionalEncoding(nn.Module):
@@ -203,17 +203,18 @@ class T3S(nn.Module):
 
     def calculate_loss(self, anchor, anchor_lens, pos, pos_lens, neg, neg_lens,
                        trajs_a, trajs_a_lens, trajs_p, trajs_p_lens, trajs_n, trajs_n_lens,
-                       anchor_idxs, pos_idxs, neg_idxs, sim_pos, sim_neg):
+                       anchor_idxs, pos_idxs, neg_idxs, sim_pos, sim_neg, sim_matrix_a):
         batch_size = anchor.size(0)
         tri_num = neg.shape[0] // batch_size
         output_a = self.forward(anchor, trajs_a, trajs_a_lens)
         output_p = self.forward(pos, trajs_p, trajs_p_lens)
-        output_n = self.forward(neg, trajs_n, trajs_n_lens)
+        # output_n = self.forward(neg, trajs_n, trajs_n_lens)
         sim_p = torch.exp(-torch.norm(output_a.repeat(tri_num, 1) - output_p, dim=1)).reshape(batch_size, -1)
-        sim_n = torch.exp(-torch.norm(output_a.repeat(tri_num, 1) - output_n, dim=1)).reshape(batch_size, -1)
+        sim_a = torch.exp(-torch.norm(output_a.unsqueeze(1)-output_a, dim=2)).reshape(batch_size, -1)
+        # sim_n = torch.exp(-torch.norm(output_a.repeat(tri_num, 1) - output_n, dim=1)).reshape(batch_size, -1)
         w_p = torch.softmax(torch.ones(tri_num)/torch.arange(1, tri_num+1).float(), dim=0).to(output_a.device)
         loss_p = torch.sum(w_p * (sim_p - sim_pos)**2, dim=1)
-        loss_n = torch.sum(w_p * (torch.relu(sim_n - sim_neg))**2, dim=1)
+        loss_n = torch.sum((torch.relu(sim_a - sim_matrix_a))**2, dim=1)
         loss = (loss_p + loss_n).mean()
         return loss
 
@@ -223,8 +224,8 @@ class T3S(nn.Module):
         with torch.no_grad():
             for (anchor, anchor_lens, pos, pos_lens, neg, neg_lens,
                  trajs_a, trajs_a_lens, trajs_p, trajs_p_lens, trajs_n, trajs_n_lens,
-                 anchor_idxs, pos_idxs, neg_idxs, sim_pos, sim_neg) in test_loader:
-                test_num = 64
+                 anchor_idxs, pos_idxs, neg_idxs, sim_pos, sim_neg, sim_matrix_a) in test_loader:
+                test_num = 200
                 tb_anchor = anchor[:test_num].to(device)
                 tb_trajs_a = trajs_a[:test_num].to(device)
                 tb_trajs_a_lens = trajs_a_lens[:test_num]
@@ -319,20 +320,21 @@ def train_t3s(args):
             timer.tok(f"epoch:{epoch} acc:{acc:.4f}")
         for batch_idx, (anchor, anchor_lens, pos, pos_lens, neg, neg_lens,
                         trajs_a, trajs_a_lens, trajs_p, trajs_p_lens, trajs_n, trajs_n_lens,
-                        anchor_idxs, pos_idxs, neg_idxs, sim_pos, sim_neg) in enumerate(train_loader):
+                        anchor_idxs, pos_idxs, neg_idxs, sim_pos, sim_neg, sim_matrix_a) in enumerate(train_loader):
             anchor = anchor.to(device)
             pos = pos.to(device)
-            neg = neg.to(device)
-            trajs_n = trajs_n.to(device)
+            # neg = neg.to(device)
+            # trajs_n = trajs_n.to(device)
             trajs_a = trajs_a.to(device)
             trajs_p = trajs_p.to(device)
             sim_pos = sim_pos.to(device)
-            sim_neg = sim_neg.to(device)
+            # sim_neg = sim_neg.to(device)
+            sim_matrix_a = sim_matrix_a.to(device)
+            optimizer.zero_grad()
             loss = model.calculate_loss(
                 anchor, anchor_lens, pos, pos_lens, neg, neg_lens,
                 trajs_a, trajs_a_lens, trajs_p, trajs_p_lens, trajs_n, trajs_n_lens,
-                anchor_idxs, pos_idxs, neg_idxs, sim_pos, sim_neg)
-            optimizer.zero_grad()
+                anchor_idxs, pos_idxs, neg_idxs, sim_pos, sim_neg, sim_matrix_a)
             loss.backward()
             optimizer.step()
             timer.tok(f"epoch:{epoch} batch:{batch_idx} train loss:{loss.item()}")
