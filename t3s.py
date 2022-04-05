@@ -1,9 +1,7 @@
-from lib2to3.pytree import NegatedPattern
-from turtle import distance
 import torch
 import torch.utils.data as tud
 import torch.nn.utils.rnn as rnn_utils
-from torch import negative_, nn
+from torch import nn
 import numpy as np
 import json
 import math
@@ -15,39 +13,72 @@ timer = utils.Timer()
 
 
 class MetricLearningDataset(tud.Dataset):
-    def __init__(self, file_train, triplet_num, aphla=1):
+    def __init__(self, file_train, triplet_num, min_len, max_len, dataset_size=None):
+        self.triplet_num = triplet_num
+        self.min_len = min_len
+        self.max_len = max_len
+        self.dataset_size = dataset_size
+        self.trajs = None
+        self.original_trajs = None
+        self.dis_matrix = None
+        self.sorted_index = None
+        self.sim_matrix = None
+        self.data_prepare(json.load(open(file_train)))
+
+    def data_prepare(self, train_dict):
         """
         train_dict['trajs'] : list of list of idx
-        train_dict['sorted_index'] : sorted matrix of most similarity trajs
         train_dict['origin_trajs'] : list of list of (lon, lat)
         train_dict['dis_matrix'] : distance matrix
         """
-        self.train_dict = json.load(open(file_train))
-        self.triplet_num = triplet_num
-        self.dis_matrix = np.array(self.train_dict['dis_matrix'])
-        self.trajs = np.array(self.train_dict["trajs"], dtype=object)
-        self.original_traj = np.array(self.train_dict["origin_trajs"], dtype=object)
-        self.aphla = aphla
-        self.sim_matrix = np.exp(-self.aphla * self.dis_matrix) / np.sum(np.exp(-self.aphla * self.dis_matrix), axis=1, keepdims=True)
-        
-    def __len__(self):
-        return len(self.train_dict["trajs"])
+        trajs = []
+        original_trajs = []
+        used_idxs = []
+        x = []
+        y = []
+        for original_traj in train_dict["origin_trajs"]:
+            x.extend([i[0] for i in original_traj])
+            y.extend([i[1] for i in original_traj])
+        meanx, meany, stdx, stdy = np.mean(x), np.mean(y), np.std(x), np.std(y)
+        for idx, traj in enumerate(train_dict["trajs"]):
+            if self.min_len < len(traj) < self.max_len:
+                trajs.append(traj)
+                original_traj = train_dict["origin_trajs"][idx]
+                original_traj = [[(i[0] - meanx)/stdx, (i[1] - meany)/stdy] for i in original_traj]
+                original_trajs.append(original_traj)
+                used_idxs.append(idx)
+        if self.dataset_size is None:
+            self.dataset_size = len(used_idxs)
+        else:
+            self.dataset_size = min(self.dataset_size, len(used_idxs))
+        used_idxs = used_idxs[:self.dataset_size]
+        self.trajs = np.array(trajs[:self.dataset_size], dtype=object)
+        self.original_trajs = np.array(original_trajs[:self.dataset_size], dtype=object)
+        self.dis_matrix = np.array(train_dict["dis_matrix"])[used_idxs, :][:, used_idxs]
+        self.sorted_index = np.argsort(self.dis_matrix, axis=1)
+        a = 10
+        self.sim_matrix = np.exp(-a * self.dis_matrix) / np.sum(np.exp(-a * self.dis_matrix), axis=1, keepdims=True)
 
-    
+    def __len__(self):
+        return self.dataset_size
+
     def __getitem__(self, idx):
         anchor = self.trajs[idx]
-        positive_idx = self.train_dict['sorted_index'][idx][:self.triplet_num+1]
+        positive_idx = self.sorted_index[idx][:self.triplet_num+1].tolist()
         if idx in positive_idx:
             positive_idx.remove(idx)
         else:
             positive_idx = positive_idx[:self.triplet_num]
         positive = self.trajs[positive_idx]
-        negative_idx = self.train_dict['sorted_index'][idx][-self.triplet_num:]
+        negative_idx = self.sorted_index[idx][-self.triplet_num:].tolist()
         list.reverse(negative_idx)
+        negative_idx_idx = torch.multinomial(torch.tensor(self.sorted_index[idx][self.triplet_num:], dtype=torch.float), self.triplet_num)
+        negative_idx_idx = torch.sort(negative_idx_idx, descending=True).values.tolist()
+        negative_idx = self.sorted_index[idx][self.triplet_num:][negative_idx_idx]
         negative = self.trajs[negative_idx]
-        trajs_a = self.original_traj[idx]
-        trajs_p = self.original_traj[positive_idx]
-        trajs_n = self.original_traj[negative_idx]
+        trajs_a = self.original_trajs[idx]
+        trajs_p = self.original_trajs[positive_idx]
+        trajs_n = self.original_trajs[negative_idx]
         return anchor, positive, negative, trajs_a, trajs_p, trajs_n, idx, positive_idx, negative_idx, self.sim_matrix[idx, positive_idx], self.sim_matrix[idx, negative_idx]
 
 
@@ -152,21 +183,22 @@ class T3S(nn.Module):
         """
         # transformer embedding
         mask_x = (x == -1)  # [batch_size, seq_len]
-        x.clamp_min_(0)
+        x = x.clamp_min(0)
         emb_x = self.embedding(x)  # emb_x: [batch_size, seq_len, dim_emb]
         pe_emb_x = self.position_encoding(emb_x)
-        pe_emb_x[mask_x] = 0
+        # encoder_out2 = self.encoder(pe_emb_x, src_key_padding_mask=mask_x)  # [batch_size, seq_len, dim_emb]
+        # pe_emb_x[mask_x] = 0
         encoder_out = self.encoder(pe_emb_x, src_key_padding_mask=mask_x)  # [batch_size, seq_len, dim_emb]
         encoder_out_mean = torch.mean(encoder_out, 1)  # batch_size, dim_emb]
         # lstm embedding
         trajs = rnn_utils.pack_padded_sequence(trajs, trajs_lens, batch_first=True, enforce_sorted=False)
         lstm_out, (h_n, c_n) = self.lstm(trajs)
-        lstm_out, out_len = rnn_utils.pad_packed_sequence(lstm_out, batch_first=True)
-        out_len = out_len.to(lstm_out.device)
-        lstm_out = lstm_out.index_select(1, out_len - 1)
-        lstm_out_last = lstm_out.diagonal(dim1=0, dim2=1).transpose(0, 1)
+        # lstm_out, out_len = rnn_utils.pad_packed_sequence(lstm_out, batch_first=True)
+        # out_len = out_len.to(lstm_out.device)
+        # lstm_out = lstm_out.index_select(1, out_len - 1)
+        # lstm_out_last = lstm_out.diagonal(dim1=0, dim2=1).transpose(0, 1)
         # add
-        output = self.lamb * encoder_out_mean + (1 - self.lamb) * lstm_out_last  # output: [batch_size, dim_emb]
+        output = self.lamb * encoder_out_mean + (1 - self.lamb) * h_n.squeeze()  # output: [batch_size, dim_emb]
         return output
 
     def calculate_loss(self, anchor, anchor_lens, pos, pos_lens, neg, neg_lens,
@@ -177,9 +209,9 @@ class T3S(nn.Module):
         output_a = self.forward(anchor, trajs_a, trajs_a_lens)
         output_p = self.forward(pos, trajs_p, trajs_p_lens)
         output_n = self.forward(neg, trajs_n, trajs_n_lens)
-        sim_p = torch.cosine_similarity(output_a.repeat(tri_num, 1), output_p, dim=1).reshape(batch_size, -1)
-        sim_n = torch.cosine_similarity(output_a.repeat(tri_num, 1), output_n, dim=1).reshape(batch_size, -1)
-        w_p = torch.softmax(torch.ones(tri_num)/torch.arange(1, tri_num+1).float(),dim=0).to(output_a.device)
+        sim_p = torch.exp(-torch.norm(output_a.repeat(tri_num, 1) - output_p, dim=1)).reshape(batch_size, -1)
+        sim_n = torch.exp(-torch.norm(output_a.repeat(tri_num, 1) - output_n, dim=1)).reshape(batch_size, -1)
+        w_p = torch.softmax(torch.ones(tri_num)/torch.arange(1, tri_num+1).float(), dim=0).to(output_a.device)
         loss_p = torch.sum(w_p * (sim_p - sim_pos)**2, dim=1)
         loss_n = torch.sum(w_p * (torch.relu(sim_n - sim_neg))**2, dim=1)
         loss = (loss_p + loss_n).mean()
@@ -196,7 +228,7 @@ class T3S(nn.Module):
                 tb_anchor = anchor[:test_num].to(device)
                 tb_trajs_a = trajs_a[:test_num].to(device)
                 tb_trajs_a_lens = trajs_a_lens[:test_num]
-                tb_pos_idxs = pos_idxs[:test_num].to(device)
+                tb_pos_idxs = pos_idxs[:test_num*tri_num].reshape(test_num, tri_num).cpu().numpy()
                 output_a = self.forward(tb_anchor, tb_trajs_a, tb_trajs_a_lens)
                 bsz = 200
                 sim_matrixs = []
@@ -204,9 +236,10 @@ class T3S(nn.Module):
                     lb = i * bsz
                     ub = min((i+1)*bsz, len(anchor))
                     output_b = self.forward(anchor[lb:ub].to(device), trajs_a[lb:ub].to(device), trajs_a_lens[lb:ub])
-                    sim_matrixs.append(torch.cosine_similarity(output_a.unsqueeze(1), output_b.unsqueeze(0), dim=-1))
-                sim_matrix = torch.cat(sim_matrixs, dim=0).cpu().numpy()
-                sorted_index = np.argsort(sim_matrix, axis=1)
+                    s = torch.exp(-torch.norm(output_a.unsqueeze(1) - output_b, dim=-1))
+                    sim_matrixs.append(s)
+                sim_matrix = torch.cat(sim_matrixs, dim=1).cpu().numpy()
+                sorted_index = np.argsort(-sim_matrix, axis=1)
                 for i in range(test_num):
                     avg_rank = 0
                     for idx in tb_pos_idxs[i]:
@@ -227,21 +260,23 @@ def train_t3s(args):
     batch_size = args.batch_size
     pretrained_embedding_file = args.pretrained_embedding
     emb_size = args.embedding_size
-    learning_rate = args.learning_rate    
+    learning_rate = args.learning_rate
     epochs = args.epoch_num
-    checkpoint = args.checkpoint
+    cp = args.checkpoint
     vocab_size = args.vocab_size
     triplet_num = args.triplet_num
-    heads = args.headsnn
+    min_len = args.min_len
+    max_len = args.max_len
+    heads = args.heads
     device = torch.device(args.device)
     vp = args.visdom_port
 
     # prepare data
     timer.tik("prepare data")
-    dataset = MetricLearningDataset(train_dataset, triplet_num)
+    dataset = MetricLearningDataset(train_dataset, triplet_num, min_len, max_len)
     train_loader = tud.DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
-    test_dataset = MetricLearningDataset(validate_dataset, triplet_num)
-    test_loader = tud.DataLoader(test_dataset, batch_size=len(test_dataset), shuffle=True, collate_fn=collate_fn)
+    test_dataset = MetricLearningDataset(validate_dataset, triplet_num, min_len, max_len)
+    test_loader = tud.DataLoader(test_dataset, batch_size=len(test_dataset), collate_fn=collate_fn)
     timer.tok("prepare data")
 
     # init model
@@ -257,14 +292,14 @@ def train_t3s(args):
     timer.tok("init model")
 
     # load checkpoint
-    if checkpoint is not None:
-        checkpoint = torch.load(checkpoint)
-        if checkpoint.get('model'):
-            model.load_state_dict(checkpoint['model'])
-        if checkpoint.get('optimizer'):
-            optimizer.load_state_dict(checkpoint['optimizer'])
-        if checkpoint.get('epoch'):
-            epoch_start = checkpoint['epoch'] + 1
+    if cp is not None:
+        cp = torch.load(cp)
+        if cp.get('model'):
+            model.load_state_dict(cp['model'])
+        if cp.get('optimizer'):
+            optimizer.load_state_dict(cp['optimizer'])
+        if cp.get('epoch'):
+            epoch_start = cp['epoch'] + 1
 
     # init visdom
     if vp != 0:
@@ -276,12 +311,12 @@ def train_t3s(args):
     # train
     timer.tik("train")
     batch_count = 0
-    train_loss_list = []
     for epoch in range(epoch_start, epochs):
         if epoch % 1 == 0:
             acc = model.evaluate(test_loader, device, tri_num=triplet_num)
-            env.line(X=[epoch + 1], Y=[acc], win=pane3, update='append')
-            timer.tok(f"epoch:{epoch} batch:{batch_idx} acc:{acc:.4f}")
+            if vp != 0:
+                env.line(X=[epoch + 1], Y=[acc], win=pane3, update='append')
+            timer.tok(f"epoch:{epoch} acc:{acc:.4f}")
         for batch_idx, (anchor, anchor_lens, pos, pos_lens, neg, neg_lens,
                         trajs_a, trajs_a_lens, trajs_p, trajs_p_lens, trajs_n, trajs_n_lens,
                         anchor_idxs, pos_idxs, neg_idxs, sim_pos, sim_neg) in enumerate(train_loader):
@@ -300,13 +335,10 @@ def train_t3s(args):
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            timer.tok(
-                f"epoch:{epoch} batch:{batch_idx} train loss:{loss.item():.4f}")
-            train_loss_list.append(float(loss))
+            timer.tok(f"epoch:{epoch} batch:{batch_idx} train loss:{loss.item()}")
             batch_count += 1
             if vp != 0:
                 env.line(X=[batch_count], Y=[loss.item()], win=pane1, update='append')
         if epoch % 10 == 9:
-            checkpoint = {'model': model.state_dict(), 'optihmizer': optimizer.state_dict(), 'epoch': epoch}
-            torch.save(
-                checkpoint, f'model/checkpoint_{epoch}_loss{round(float(loss), 3)}_acc_{round(float(acc), 3)}.pth')
+            cp = {'model': model.state_dict(), 'optihmizer': optimizer.state_dict(), 'epoch': epoch}
+            torch.save(cp, f'model/cp_{epoch}_loss{round(float(loss), 3)}_acc_{round(float(acc), 3)}.pth')

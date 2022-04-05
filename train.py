@@ -21,6 +21,8 @@ parser.add_argument('--validate_dataset', '-data_va', type=str, default="data/te
 parser.add_argument('--pretrained_embedding', '-pre', type=str, default=None)
 parser.add_argument('--embedding_size', '-emb', type=int, default=128)
 parser.add_argument('--vocab_size', '-vocab', type=int, default=44612)
+parser.add_argument('--min_len', '-min_len', type=int, default=10)
+parser.add_argument('--max_len', '-max_len', type=int, default=128)
 parser.add_argument('--window_size', '-ws', type=int, default=20)
 parser.add_argument('--triplet_num', '-tn', type=int, default=4)
 parser.add_argument('--heads', '-heads', type=int, default=8)
