@@ -186,7 +186,6 @@ class T3S(nn.Module):
         x = x.clamp_min(0)
         emb_x = self.embedding(x)  # emb_x: [batch_size, seq_len, dim_emb]
         pe_emb_x = self.position_encoding(emb_x)
-        # encoder_out2 = self.encoder(pe_emb_x, src_key_padding_mask=mask_x)  # [batch_size, seq_len, dim_emb]
         # pe_emb_x[mask_x] = 0
         encoder_out = self.encoder(pe_emb_x, src_key_padding_mask=mask_x)  # [batch_size, seq_len, dim_emb]
         encoder_out_mean = torch.mean(encoder_out, 1)  # batch_size, dim_emb]
@@ -344,3 +343,5 @@ def train_t3s(args):
         if epoch % 10 == 9:
             cp = {'model': model.state_dict(), 'optihmizer': optimizer.state_dict(), 'epoch': epoch}
             torch.save(cp, f'model/cp_{epoch}_loss{round(float(loss), 3)}_acc_{round(float(acc), 3)}.pth')
+            torch.save(model, 'model/model.pth')
+        torch.save(model, 'model/model.pth')
