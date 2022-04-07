@@ -4,8 +4,10 @@ import numpy as np
 
 
 class Traj2Grid:
-    def __init__(self, m, n, min_lon, min_lat, max_lon, max_lat):
+    def __init__(self, m, n, min_lon, min_lat, max_lon, max_lat, grid2idx=None):
         self.grid2idx = {}
+        if grid2idx:
+            self.grid2idx = grid2idx
         self.row_num = m  # 行数
         self.column_num = n  # 列数
         self.min_lon = min_lon
