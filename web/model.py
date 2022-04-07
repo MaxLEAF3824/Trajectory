@@ -8,21 +8,17 @@ class Trajectory(Base):
     __tablename__ = "trajectory"
     id = Column(Integer, primary_key=True)
     length = Column(Integer)
-    discrete_points = Column(Text)
-    spherical_points = Column(Text)
+    start_time = Column(Integer)
+    end_time = Column(Integer)
+    points = Column(Text)
+    embedding = Column(Text)
 
     def __repr__(self):
-        return f"id(id={self.id!r}, length={self.length!r}, discrete_points={self.discrete_points!r}, " \
-               f"spherical_points={self.spherical_points!r}) "
+        return f"id(id={self.id!r}, length={self.length!r}, start_time={self.start_time}, end_time={self.end_time} " \
+               f"points={self.points!r}, embedding={self.embedding}) "
 
 
-class OriginalTrajectoryPoint(Base):
-    __tablename__ = "original_trajectory"
-    id = Column(String(32), primary_key=True)
-    time = Column(Integer, primary_key=True)
-    longitude = Column(Float)
-    latitude = Column(Float)
-
-    def __repr__(self):
-        return f"id(id={self.id!r}, time={self.time!r}, longitude={self.longitude!r}, latitude={self.latitude!r})"
-
+if __name__ == "__main__":
+    a = [1, 2, 3, 4, 5]
+    t = Trajectory(id=1, length=len(a), start_time=a[0], end_time=a[-1], points=a, embedding="")
+    print(t.points)

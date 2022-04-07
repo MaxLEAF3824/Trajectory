@@ -7,20 +7,14 @@ var app = new Vue({
         result_trajs: [],
         input_id: '',
         select_options: [{
-            value: 'efficient',
-            label: 'efficient'
+            value: 'efficient_bf',
+            label: 'efficient brute force'
         }, {
-            value: 'edr',
-            label: 'edr'
-        }, {
-            value: 'erp',
-            label: 'erp'
+            value: 'efficient_faiss',
+            label: 'efficient faiss'
         }, {
             value: 'lcss',
             label: 'lcss'
-        }, {
-            value: 'frechet',
-            label: 'frechet'
         }, {
             value: 'discret_frechet',
             label: 'discret_frechet'
@@ -117,7 +111,7 @@ var app = new Vue({
             if (this.query_traj === null) {
                 app.$message({
                     type: 'error',
-                    message: 'query_traj为空',
+                    message: '要查询的轨迹为空',
                   });
             } else {
                 var selected_type = $("#type_select").val()
@@ -176,65 +170,6 @@ var app = new Vue({
                 strokeStyle: "solid",
                 zIndex: 10,
             })
-        },
-        uploadDataset() {
-            var file = $("#file")[0].files[0];
-            var formData = new FormData();
-            formData.append("file", file);
-            $.ajax({
-                type: "POST",
-                url: "/upload",
-                data: formData,
-                processData: false,
-                contentType: false,
-                success: function (data) {
-                    console.log(data)
-                    if (data.success) {
-                        app.$message({
-                            type: 'success',
-                            message: '上传成功!',
-                          });
-                    } else {
-                        app.$message({
-                            type: 'error',
-                            message: '上传失败',
-                          });
-                    }
-                }
-            })
-        },
-        query_by_traj_id() {
-            var traj_id = app.input_id;
-            var selected_type = $("#type_select").val()
-            const start_time = Math.round(new Date());
-            $.ajax({
-                type: "POST",
-                url: "/query_by_traj_id",
-                data: {
-                    traj_id: traj_id,
-                    type: selected_type,
-                },
-                success: function (data) {
-                    console.log(data)
-                    app.loading = false;
-                    if (data.success) {
-                        const end_time = Math.round(new Date());
-                        app.$message({
-                            type: 'success',
-                            message: '查询成功!\n耗时: ' + (end_time - start_time) + 'ms',
-                          });
-                        app.result_trajs = data.result.slice(1, data.result.length);
-                        app.query_traj = data.result[0].data
-                        app.drawResult();
-                    } else {
-                        app.$message({
-                            type: 'error',
-                            message: '查询失败',
-                          });
-                    }
-                }
-            })
-            app.loading = true;
         },
         handleHighlight(index, row) {
             console.log(index)

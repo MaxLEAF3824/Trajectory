@@ -1,104 +1,111 @@
-import torch
-import torch.nn.utils.rnn as rnn_utils
 from joblib import Parallel, delayed
 import numpy as np
-import random
 import traj_dist.distance as tdist
+from typing import List
+from efficient_solver import EfficientSolver
 from mapper import Mapper
-from model import Trajectory, OriginalTrajectoryPoint
-import json
-import sys
-sys.path.append('../')
-from t3s import T3S
-from traj2grid import Traj2Grid
-from parameters import *
+from model import Trajectory
+
 
 class Service:
-    def __init__(self,model_file="../model/model.pth", dict_path="../data/str_grid2idx_400_44612.json"):
+    def __init__(self):
         self.mapper = Mapper()
-        self.model = torch.load(model_file)
-        self.model = self.model.to("cpu")
-        self.t2g = Traj2Grid(400,400,min_lon,min_lat,max_lon,max_lat)
-        str_grid2idx = json.load(open(dict_path))
-        grid2idx = {eval(g): str_grid2idx[g] for g in list(str_grid2idx)}
-        self.t2g.set_vocab(grid2idx)
-    
-    
-    # 高效算法
-    def query_efficient(self, query_traj, k=10):
-        query_traj_1d, query_traj_sp= self.t2g.convert1d(query_traj)
-        all_trajs = self.mapper.get_trajectories_all()
-        all_id = [traj.id for traj in all_trajs]
-        all_trajs_sp = [torch.FloatTensor(eval(traj.spherical_points)) for traj in all_trajs]
-        all_trajs_sp_len = [len(traj) for traj in all_trajs_sp]
-        all_trajs_1d = [torch.LongTensor(eval(traj.discrete_points)) for traj in all_trajs]
-        print("get all done")
-        
-        v1 = self.model(torch.LongTensor(query_traj_1d).unsqueeze(0), torch.FloatTensor(query_traj_sp).unsqueeze(0), torch.tensor([len(query_traj_sp)],dtype=torch.long))
-        all_trajs_1d = rnn_utils.pad_sequence(all_trajs_1d, batch_first=True, padding_value=-1)
-        v_all = self.model(torch.LongTensor(all_trajs_1d).unsqueeze(0), torch.FloatTensor(all_trajs_sp).unsqueeze(0), torch.tensor(all_trajs_sp_len,dtype=torch.long).unsqueeze(0))
-        
-        dis_list = torch.norm(v1.unsqueeze(0) - v_all, dim=2)
-        sorted_dis, idxs = torch.sort(dis_list, dim=1)
-        
-        top_k_trajs = np.array(all_trajs)[idxs[0][:k]].tolist()
-        return top_k_trajs
+        self.solver = EfficientSolver()
 
-    # 传统算法
-    def query_traditional(self, query_traj, query_type, k=10, jobs_num=22):
+    def knn_query(self, query_traj: List[List[float, float]], query_type: str, k: int,
+                  time_slice=None, jobs_num=22) -> (List[Trajectory], List[float]):
         """
-        :param k: int, k近邻
-        :param query_type: str, 查询类型
-        :param query_traj: list of list
-        :return: Dict{id, data, length}
+        相似性轨迹检索的总入口
+        :param query_traj: List[List[float,float]]:query轨迹,经纬度坐标序列
+        :param query_type: str:查询类型,字符串
+        :param k: int k近邻
+        :param jobs_num: 传统查询调用的CPU核心数
+        :param time_slice: List[int,int]: 时间戳切片,如[0,10]表示查询与时间戳0-10有交集的轨迹
+        :return: 最相似的k个轨迹的信List[Trajectory],返回的轨迹的points已经是List[List[float,float]]
         """
-
-        # query并格式化所有轨迹
-        all_trajs = self.mapper.get_trajectories_all()
-        all_trajs = [(traj.id, np.array(eval(traj.spherical_points))) for traj in all_trajs]
-        print("get all done")
-
-        # 查询结果
-        query_traj = np.array(query_traj)
-        if not query_type:
-            query_type="discret_frechet"
-        metric_func = getattr(tdist, query_type)
-
-        def cal_sim(traj_id, traj: np.array):
-            if query_type == "edr" or query_type == "lcss":
-                dis = metric_func(query_traj, traj, eps=0.00029)
-            elif query_type == "erp":
-                dis = metric_func(query_traj, traj, g=np.zeros(2, dtype=float))
+        sims = []
+        top_k_id = []
+        # 高效算法
+        if query_type == "efficient_bf" or query_type == "efficient_faiss":
+            # 根据是否考虑时间切片获取相应的轨迹列表
+            if time_slice:
+                start_time, end_time = int(time_slice[0]), int(time_slice[1])
+                traj_list = self.mapper.get_trajectories_embedding_by_time_slice(start_time, end_time)
             else:
-                dis = metric_func(query_traj, traj)
-            print(f"traj_id:{traj_id}, dis:{dis}")
-            sim = 1 - dis
-            return {"id": str(traj_id), "data": traj.tolist(), "length": len(traj), "sim": sim}
+                traj_list = self.mapper.get_all_trajectories_embedding()
+            id_list = [traj[0] for traj in traj_list]
+            emb_arr = np.array([(eval(traj[1])) for traj in traj_list])
+            # 获取query轨迹的embedding
+            query_emb = self.solver.embed_trajectory(query_traj)
+            if query_type == "efficient_bf":
+                # 暴力计算query轨迹与所有轨迹的相似度
+                sim_matrix = self.solver.compute_similarity(query_emb, emb_arr)
+                sorted_idx = np.argsort(-sim_matrix)
+                top_k_id = [id_list[i] for i in sorted_idx[:, :k]]
+                sims = sim_matrix[:, sorted_idx].tolist()
+            else:
+                # TODO: 用faiss查询
+                pass
 
-        # 并行计算
-        result = Parallel(n_jobs=jobs_num)(delayed(cal_sim)(traj_id, traj) for traj_id, traj in all_trajs)
-        print("cal sim done")
+        # 传统算法
+        else:
+            # 根据是否考虑时间切片获取相应的轨迹列表
+            if time_slice:
+                start_time, end_time = int(time_slice[0]), int(time_slice[1])
+                traj_list = self.mapper.get_trajectories_points_by_time_slice(start_time, end_time)
+            else:
+                traj_list = self.mapper.get_all_trajectories_points()
 
-        # 排序
-        result.sort(key=lambda x: x["sim"], reverse=True)
-        return result[:k]
+            id_list = [traj[0] for traj in traj_list]
+            points_list = [(eval(traj[1])) for traj in traj_list]
+            qt = np.array(query_traj)
+            metric_func = getattr(tdist, query_type)
 
-    def insert_trajectories(self, dataset_json_file):
-        dataset = json.load(open(dataset_json_file))
-        if not dataset.get("origin_trajs") or not dataset.get("trajs"):
-            return 1  # 数据格式错误
-        trajectories = []
-        for idx, traj in enumerate(dataset["trajs"]):
-            trajectories.append(Trajectory(
-                id=None,
-                length=len(traj),
-                discrete_points=str(traj),
-                spherical_points=str(dataset['origin_trajs'][idx]),
-            ))
-        return self.mapper.insert_trajectories(trajectories)
+            # 定义相似度函数
+            def cal_sim(tid, qt, traj: np.array):
+                if query_type == "lcss":
+                    dis = metric_func(qt, traj, eps=0.00029)
+                else:
+                    dis = metric_func(qt, traj)
+                print(f"id:{tid}, dis:{dis}")
+                sim = 1 - dis
+                return tid, sim
 
-    def get_traj_by_id(self, traj_id):
+            # 多核并行计算相似度
+            res = Parallel(n_jobs=jobs_num)(delayed(cal_sim)(tid, qt, traj) for tid, traj in zip(id_list, points_list))
+            top_k_res = sorted(res, key=lambda x: x[1], reverse=True)[:k]
+            top_k_id = [tid for tid, sim in top_k_res]
+            sims = [sim for tid, sim in top_k_res]
+        result_traj_list = self.mapper.get_trajectory_by_id_list(top_k_id)
+        for traj in result_traj_list:
+            traj.points = eval(traj.points)
+        return result_traj_list, sims
+
+    # 根据id返回trajectory
+    def get_traj_by_id(self, traj_id) -> Trajectory:
         traj = self.mapper.get_trajectory_by_id(traj_id)
         if not traj:
-            return None
+            return Trajectory()
         return traj
+
+    def generate_embedding_all(self):
+        """
+        为整张表的轨迹(重新)生成embedding
+        获取全表轨迹的id, points, 用solver生成embedding,再update回去
+        """
+        traj_list = self.mapper.get_all_trajectories_points()
+        points_list = [traj[1] for traj in traj_list]
+        id_list = [traj[0] for traj in traj_list]
+        embeddings = self.solver.embed_trajectory_batch(points_list)
+        embeddings = [str(embedding.tolist()) for embedding in embeddings]
+        for i, tid in enumerate(id_list):
+            self.mapper.update_trajectory_embedding(tid, embeddings[i])
+
+    # TODO 向数据库中插入一批新轨迹并生成其embedding
+    def insert_trajectories(self, trajectories):
+        """
+        向数据库中插入一批新轨迹并生成其embedding
+        :param trajectories: List[List[float,float]]
+        :return:
+        """
+        pass
