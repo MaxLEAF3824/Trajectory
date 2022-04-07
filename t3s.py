@@ -140,11 +140,11 @@ def collate_fn(train_data):
 
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, emb_size, dropout=0.0):
+    def __init__(self, emb_size, dropout=0.0, pe_max_len=512):
         super(PositionalEncoding, self).__init__()
         self.dropout = nn.Dropout(p=dropout)
-        pe = torch.zeros(512, emb_size)  # [512, d_model]
-        position = torch.arange(0, 512, dtype=torch.float).unsqueeze(1)  # [512, 1]
+        pe = torch.zeros(pe_max_len, emb_size)  # [pe_max_len, d_model]
+        position = torch.arange(0, pe_max_len, dtype=torch.float).unsqueeze(1)  # [pe_max_len, 1]
         div_term = torch.exp(torch.arange(0, emb_size, 2).float() * (-math.log(10000.0) / emb_size))
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
@@ -170,7 +170,7 @@ class T3S(nn.Module):
             self.embedding = nn.Embedding(vocab_size, emb_size).from_pretrained(pre_emb)
         else:
             self.embedding = nn.Embedding(vocab_size, emb_size)
-        self.position_encoding = PositionalEncoding(emb_size, dropout=0.1, )
+        self.position_encoding = PositionalEncoding(emb_size, dropout=0.1)
         self.encoder = nn.TransformerEncoder(nn.TransformerEncoderLayer(
             emb_size, heads, batch_first=True), encoder_layers)
         self.lstm = nn.LSTM(2, emb_size, lstm_layers, batch_first=True)
@@ -182,20 +182,20 @@ class T3S(nn.Module):
         trajs_lens: [batch_size]
         """
         # transformer embedding
+        seq_len = x.shape[1]
         mask_x = (x == -1)  # [batch_size, seq_len]
+        lens = seq_len - torch.sum(mask_x, dim=1)  # [batch_size]
         x = x.clamp_min(0)
         emb_x = self.embedding(x)  # emb_x: [batch_size, seq_len, dim_emb]
         pe_emb_x = self.position_encoding(emb_x)
         # pe_emb_x[mask_x] = 0
         encoder_out = self.encoder(pe_emb_x, src_key_padding_mask=mask_x)  # [batch_size, seq_len, dim_emb]
-        encoder_out_mean = torch.mean(encoder_out, 1)  # batch_size, dim_emb]
+        encoder_out[mask_x] = 0
+        encoder_out_mean = encoder_out.sum(dim=1) / lens.unsqueeze(1)  # [batch_size, dim_emb]
+        # encoder_out_mean = torch.mean(encoder_out, 1)  # batch_size, dim_emb]
         # lstm embedding
         trajs = rnn_utils.pack_padded_sequence(trajs, trajs_lens, batch_first=True, enforce_sorted=False)
         lstm_out, (h_n, c_n) = self.lstm(trajs)
-        # lstm_out, out_len = rnn_utils.pad_packed_sequence(lstm_out, batch_first=True)
-        # out_len = out_len.to(lstm_out.device)
-        # lstm_out = lstm_out.index_select(1, out_len - 1)
-        # lstm_out_last = lstm_out.diagonal(dim1=0, dim2=1).transpose(0, 1)
         # add
         output = self.lamb * encoder_out_mean + (1 - self.lamb) * h_n.squeeze()  # output: [batch_size, dim_emb]
         return output
@@ -219,11 +219,14 @@ class T3S(nn.Module):
 
     def evaluate(self, test_loader, device, tri_num):
         self.eval()
-        accs = []
+        ranks = []
+        hit_ratios_10 = []
+        ratios10_50 = []
         with torch.no_grad():
             for (anchor, anchor_lens, pos, pos_lens, neg, neg_lens,
                  trajs_a, trajs_a_lens, trajs_p, trajs_p_lens, trajs_n, trajs_n_lens,
                  anchor_idxs, pos_idxs, neg_idxs, sim_pos, sim_neg, sim_matrix_a) in test_loader:
+                # 已经令dataloader的batch_size为len(dataset),所以这里一次性取出了所有的数据
                 test_num = 200
                 tb_anchor = anchor[:test_num].to(device)
                 tb_trajs_a = trajs_a[:test_num].to(device)
@@ -240,16 +243,23 @@ class T3S(nn.Module):
                     sim_matrixs.append(s)
                 sim_matrix = torch.cat(sim_matrixs, dim=1).cpu().numpy()
                 sorted_index = np.argsort(-sim_matrix, axis=1)
+                sorted_index = sorted_index[:,1:]
                 for i in range(test_num):
                     avg_rank = 0
                     for idx in tb_pos_idxs[i]:
                         avg_rank += np.argwhere(sorted_index[i] == idx)[0][0]
                     avg_rank /= len(tb_pos_idxs[i])
-                    accs.append(avg_rank)
+                    hr_10 = len(np.intersect1d(tb_pos_idxs[i], sorted_index[i][:10])) / 10 * 100
+                    r10_50 = len(np.intersect1d(tb_pos_idxs[i], sorted_index[i][:50])) / 10 * 100
+                    ranks.append(avg_rank)
+                    hit_ratios_10.append(hr_10)
+                    ratios10_50.append(r10_50)
                 break
-        acc = np.mean(accs)
+        rank = np.mean(ranks)
+        hr_10 = np.mean(hit_ratios_10)
+        r10_50 = np.mean(ratios10_50)
         self.train()
-        return acc
+        return rank, hr_10, r10_50
 
 
 def train_t3s(args):
@@ -265,6 +275,9 @@ def train_t3s(args):
     cp = args.checkpoint
     vocab_size = args.vocab_size
     triplet_num = args.triplet_num
+    dataset_size = args.dataset_size
+    lstm_layers = args.lstm_layers
+    encoder_layers = args.encoder_layers
     min_len = args.min_len
     max_len = args.max_len
     heads = args.heads
@@ -273,9 +286,9 @@ def train_t3s(args):
 
     # prepare data
     timer.tik("prepare data")
-    dataset = MetricLearningDataset(train_dataset, triplet_num, min_len, max_len)
+    dataset = MetricLearningDataset(train_dataset, triplet_num, min_len, max_len, dataset_size)
     train_loader = tud.DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
-    test_dataset = MetricLearningDataset(validate_dataset, triplet_num, min_len, max_len)
+    test_dataset = MetricLearningDataset(validate_dataset, triplet_num, min_len=0 ,max_len=99999, dataset_size=None)
     test_loader = tud.DataLoader(test_dataset, batch_size=len(test_dataset), collate_fn=collate_fn)
     timer.tok("prepare data")
 
@@ -284,9 +297,8 @@ def train_t3s(args):
     pre_emb = None
     if pretrained_embedding_file:
         pre_emb = torch.FloatTensor(np.load(pretrained_embedding_file))
-    model = T3S(vocab_size, emb_size, heads, pre_emb=pre_emb)
+    model = T3S(vocab_size, emb_size, heads, pre_emb=pre_emb, lstm_layers=lstm_layers, encoder_layers=encoder_layers).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    model.to(device)
     model.train()
     epoch_start = 0
     timer.tok("init model")
@@ -305,30 +317,27 @@ def train_t3s(args):
     if vp != 0:
         from visdom import Visdom
         env = Visdom(port=args.visdom_port)
-        pane1 = env.line(X=np.array([0]), Y=np.array([0]), opts=dict(title='train loss'))
-        pane3 = env.line(X=np.array([0]), Y=np.array([0]), opts=dict(title='accuracy'))
+        pane1_name = f'train_loss_{timer.now()}'
+        pane2_name = f'test_acc_{timer.now()}'
+        # pane1 = env.line(X=np.array([0]), Y=np.array([0]), opts=dict(title='train loss'))
+        # pane2 = env.line(X=np.array([0]), Y=np.array([0]), opts=dict(title='acc'))
 
     # train
     timer.tik("train")
     batch_count = 0
     for epoch in range(epoch_start, epochs):
-        if epoch % 1 == 0:
-            acc = model.evaluate(test_loader, device, tri_num=triplet_num)
-            if vp != 0:
-                env.line(X=[epoch + 1], Y=[acc], win=pane3, update='append')
-            timer.tok(f"epoch:{epoch} acc:{acc:.4f}")
         for batch_idx, (anchor, anchor_lens, pos, pos_lens, neg, neg_lens,
                         trajs_a, trajs_a_lens, trajs_p, trajs_p_lens, trajs_n, trajs_n_lens,
                         anchor_idxs, pos_idxs, neg_idxs, sim_pos, sim_neg, sim_matrix_a) in enumerate(train_loader):
             anchor = anchor.to(device)
             pos = pos.to(device)
-            # neg = neg.to(device)
-            # trajs_n = trajs_n.to(device)
             trajs_a = trajs_a.to(device)
             trajs_p = trajs_p.to(device)
             sim_pos = sim_pos.to(device)
-            # sim_neg = sim_neg.to(device)
             sim_matrix_a = sim_matrix_a.to(device)
+            # neg = neg.to(device)
+            # trajs_n = trajs_n.to(device)
+            # sim_neg = sim_neg.to(device)
             optimizer.zero_grad()
             loss = model.calculate_loss(
                 anchor, anchor_lens, pos, pos_lens, neg, neg_lens,
@@ -339,9 +348,14 @@ def train_t3s(args):
             timer.tok(f"epoch:{epoch} batch:{batch_idx} train loss:{loss.item()}")
             batch_count += 1
             if vp != 0:
-                env.line(X=[batch_count], Y=[loss.item()], win=pane1, update='append')
+                env.line(X=[batch_count], Y=[loss.item()], win=pane1_name, name="train loss", update='append')
+        rank, hr_10, r10_50 = model.evaluate(test_loader, device, tri_num=triplet_num)
+        if vp != 0:
+            env.line(X=[epoch], Y=[rank], win=pane2_name, name="Rank", update='append')
+            env.line(X=[epoch], Y=[hr_10], win=pane2_name, name="HR10",update='append')
+            env.line(X=[epoch], Y=[r10_50], win=pane2_name, name="R10@50",update='append')
+        timer.tok(f"epoch:{epoch} acc:{rank:.4f}")
         if epoch % 10 == 9:
             cp = {'model': model.state_dict(), 'optihmizer': optimizer.state_dict(), 'epoch': epoch}
-            torch.save(cp, f'model/cp_{epoch}_loss{round(float(loss), 3)}_acc_{round(float(acc), 3)}.pth')
-            torch.save(model, 'model/model.pth')
-        torch.save(model, 'model/model.pth')
+            torch.save(cp, f'model/cp_{epoch}_loss{round(float(loss), 3)}_acc_{round(float(rank), 3)}.pth')
+            torch.save(model, f'model/model_acc_{round(float(hr_10), 3)}.pth')
