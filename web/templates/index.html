@@ -26,9 +26,6 @@
 </head>
 <body>
 <div id="app">
-    <div class="container-fluid">
-
-    </div>
     <el-row>
         <el-col :span="6" style="marigin: 20px #000fff;">
             <h1>相似轨迹查询</h1>
@@ -38,14 +35,6 @@
                 </el-col>
                 <el-col :span="8">
                     <el-button class="btn" @click="clearDrawTraj" style="margin: 5px">关闭绘制</el-button>
-                </el-col>
-            </el-row>
-            <el-row>
-                <el-col :span="8">
-                    <el-button class="btn" @click="uploadDataset" style="margin: 5px">批量导入轨迹</el-button>
-                </el-col>
-                <el-col :span="8">
-                    <input type="file" id="file" style="margin: 5px">
                 </el-col>
             </el-row>
             <el-row>
@@ -63,15 +52,6 @@
                             </el-option>
                         </el-select>
                     </template>
-                </el-col>
-            </el-row>
-            <el-row>
-                <el-col :span="8">
-                    <el-input v-model="input_id" placeholder="请输入内容"></el-input>
-                </el-col>
-                <el-col :span="8">
-                    <el-button class="btn btn-success" @click="query_by_traj_id()" style="margin: 5px">根据id查询
-                    </el-button>
                 </el-col>
             </el-row>
             <h3>查询结果</h3>
@@ -114,6 +94,5 @@
 </div>
 
 <script src="../static/js/index.js"></script>
-
 </body>
 </html>
