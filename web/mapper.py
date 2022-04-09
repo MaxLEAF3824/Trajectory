@@ -43,28 +43,20 @@ class Mapper:
 
     def get_trajectory_by_id_list(self, id_list):
         session = Session(self.engine)
-        return session.query(Trajectory).options(
+        unsorted_trajectories = session.query(Trajectory).options(
             load_only(Trajectory.id, Trajectory.length, Trajectory.start_time, Trajectory.end_time,
                       Trajectory.points)).filter(Trajectory.id.in_(id_list)).all()
+        trajectories = []
+        for tid in id_list:
+            for traj in unsorted_trajectories:
+                if traj.id == tid:
+                    trajectories.append(traj)
+                    break
+        return trajectories
 
-    def update_trajectory_embedding(self, tid, embedding):
+    def update_trajectory_embedding_by_id(self, tid, embedding):
         session = Session(self.engine)
         session.query(Trajectory).filter(Trajectory.id == tid).update({Trajectory.embedding: embedding})
         session.commit()
         return 0
 
-
-if __name__ == "__main__":
-    mapper = Mapper()
-    all_traj = mapper.get_all_trajectories_points()
-    start_time = 1478048727
-    end_time = 1478049242
-    id_list = [1, 2, 3]
-    embeddings = ["123"] * len(id_list)
-    for i in id_list:
-        mapper.update_trajectory_embedding(i, embeddings[i - 1])
-    # traj_time_slice = mapper.get_trajectories_points_by_time_slice(start_time, end_time)
-    # traj_id_list = mapper.get_trajectory_by_id_list(id_list)
-    # for traj_id, traj in all_traj:
-    #     print(traj_id, traj)
-    #     break
