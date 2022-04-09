@@ -8,7 +8,6 @@ import math
 import utils
 import random
 from pytorch_metric_learning import losses, distances
-
 timer = utils.Timer()
 
 
@@ -40,6 +39,7 @@ class MetricLearningDataset(tud.Dataset):
             x.extend([i[0] for i in original_traj])
             y.extend([i[1] for i in original_traj])
         meanx, meany, stdx, stdy = np.mean(x), np.mean(y), np.std(x), np.std(y)
+        self.meanx, self.meany, self.stdx, self.stdy = meanx, meany, stdx, stdy
         for idx, traj in enumerate(train_dict["trajs"]):
             if self.min_len < len(traj) < self.max_len:
                 trajs.append(traj)
@@ -140,7 +140,7 @@ def collate_fn(train_data):
 
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, emb_size, dropout=0.0, pe_max_len=512):
+    def __init__(self, emb_size, dropout=0.0, pe_max_len=5000):
         super(PositionalEncoding, self).__init__()
         self.dropout = nn.Dropout(p=dropout)
         pe = torch.zeros(pe_max_len, emb_size)  # [pe_max_len, d_model]
@@ -162,7 +162,7 @@ class PositionalEncoding(nn.Module):
 
 
 class T3S(nn.Module):
-    def __init__(self, vocab_size, emb_size, heads=8, encoder_layers=1, lstm_layers=1, pre_emb=None):
+    def __init__(self, vocab_size, emb_size, heads=8, encoder_layers=1, lstm_layers=1, pre_emb=None, t2g=None):
         super(T3S, self).__init__()
         self.lamb = nn.Parameter(torch.FloatTensor(1), requires_grad=True)  # lambda
         nn.init.constant_(self.lamb, 0.5)
@@ -174,12 +174,17 @@ class T3S(nn.Module):
         self.encoder = nn.TransformerEncoder(nn.TransformerEncoderLayer(
             emb_size, heads, batch_first=True), encoder_layers)
         self.lstm = nn.LSTM(2, emb_size, lstm_layers, batch_first=True)
+        self.t2g = t2g
+        self.mean_x = None
+        self.mean_y = None
+        self.std_x = None
+        self.std_x = None
 
     def forward(self, x, trajs, trajs_lens):
         """
-        x: [batch_size, seq_len]
-        trajs: [batch_size, seq_len, 2]
-        trajs_lens: [batch_size]
+        x: LongTensor: [batch_size, seq_len]
+        trajs: FloatTensor: [batch_size, seq_len, 2]
+        trajs_lens: LongTensor: [batch_size]
         """
         # transformer embedding
         seq_len = x.shape[1]
@@ -190,9 +195,9 @@ class T3S(nn.Module):
         pe_emb_x = self.position_encoding(emb_x)
         # pe_emb_x[mask_x] = 0
         encoder_out = self.encoder(pe_emb_x, src_key_padding_mask=mask_x)  # [batch_size, seq_len, dim_emb]
-        encoder_out[mask_x] = 0
-        encoder_out_mean = encoder_out.sum(dim=1) / lens.unsqueeze(1)  # [batch_size, dim_emb]
-        # encoder_out_mean = torch.mean(encoder_out, 1)  # batch_size, dim_emb]
+        # encoder_out[mask_x] = 0
+        # encoder_out_mean = encoder_out.sum(dim=1) / lens.unsqueeze(1)  # [batch_size, dim_emb]
+        encoder_out_mean = torch.mean(encoder_out, 1)  # batch_size, dim_emb]
         # lstm embedding
         trajs = rnn_utils.pack_padded_sequence(trajs, trajs_lens, batch_first=True, enforce_sorted=False)
         lstm_out, (h_n, c_n) = self.lstm(trajs)
@@ -249,8 +254,8 @@ class T3S(nn.Module):
                     for idx in tb_pos_idxs[i]:
                         avg_rank += np.argwhere(sorted_index[i] == idx)[0][0]
                     avg_rank /= len(tb_pos_idxs[i])
-                    hr_10 = len(np.intersect1d(tb_pos_idxs[i], sorted_index[i][:10])) / 10 * 100
-                    r10_50 = len(np.intersect1d(tb_pos_idxs[i], sorted_index[i][:50])) / 10 * 100
+                    hr_10 = len(np.intersect1d(tb_pos_idxs[i][:10], sorted_index[i][:10])) / 10 * 100
+                    r10_50 = len(np.intersect1d(tb_pos_idxs[i][:10], sorted_index[i][:50])) / 10 * 100
                     ranks.append(avg_rank)
                     hit_ratios_10.append(hr_10)
                     ratios10_50.append(r10_50)
@@ -292,12 +297,23 @@ def train_t3s(args):
     test_loader = tud.DataLoader(test_dataset, batch_size=len(test_dataset), collate_fn=collate_fn)
     timer.tok("prepare data")
 
+    # init t2g
+    from traj2grid import Traj2Grid
+    from parameters import min_lon, max_lon, min_lat, max_lat
+    str_grid2idx = json.load(open("data/str_grid2idx_400_44612.json"))
+    grid2idx = {eval(g): str_grid2idx[g] for g in list(str_grid2idx)}
+    t2g = Traj2Grid(400, 400, min_lon, min_lat, max_lon, max_lat, grid2idx)
+    
     # init model
     timer.tik("init model")
     pre_emb = None
     if pretrained_embedding_file:
         pre_emb = torch.FloatTensor(np.load(pretrained_embedding_file))
-    model = T3S(vocab_size, emb_size, heads, pre_emb=pre_emb, lstm_layers=lstm_layers, encoder_layers=encoder_layers).to(device)
+    model = T3S(vocab_size, emb_size, heads, pre_emb=pre_emb, lstm_layers=lstm_layers, encoder_layers=encoder_layers, t2g=t2g).to(device)
+    model.mean_x = dataset.meanx
+    model.mean_y = dataset.meany
+    model.std_x = dataset.stdx
+    model.std_x = dataset.stdy
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     model.train()
     epoch_start = 0
@@ -325,6 +341,9 @@ def train_t3s(args):
     # train
     timer.tik("train")
     batch_count = 0
+    best_rank = 99999
+    best_hr10 = 0
+    best_r10_50 = 0
     for epoch in range(epoch_start, epochs):
         for batch_idx, (anchor, anchor_lens, pos, pos_lens, neg, neg_lens,
                         trajs_a, trajs_a_lens, trajs_p, trajs_p_lens, trajs_n, trajs_n_lens,
@@ -354,8 +373,16 @@ def train_t3s(args):
             env.line(X=[epoch], Y=[rank], win=pane2_name, name="Rank", update='append')
             env.line(X=[epoch], Y=[hr_10], win=pane2_name, name="HR10",update='append')
             env.line(X=[epoch], Y=[r10_50], win=pane2_name, name="R10@50",update='append')
-        timer.tok(f"epoch:{epoch} acc:{rank:.4f}")
+        timer.tok(f"epoch:{epoch} rank:{rank:.4f}, hr_10:{hr_10:.4f}, r10_50:{r10_50:.4f}")
         if epoch % 10 == 9:
             cp = {'model': model.state_dict(), 'optihmizer': optimizer.state_dict(), 'epoch': epoch}
-            torch.save(cp, f'model/cp_{epoch}_loss{round(float(loss), 3)}_acc_{round(float(rank), 3)}.pth')
-            torch.save(model, f'model/model_acc_{round(float(hr_10), 3)}.pth')
+            torch.save(cp, f'model/cp_{epoch}_loss{round(float(loss), 3)}_rank_{round(float(rank), 3)}.pth')
+        if rank < best_rank:
+            best_rank = rank
+            best_hr10 = hr_10
+            best_r10_50 = r10_50
+            model.to("cpu")
+            torch.save(model, f'model/best_model.pth')
+            model.to(device)
+            timer.tok(f"save new best rank:{best_rank}")
+    print(f"train finish. best rank:{best_rank} best hr10:{best_hr10} best r10@50:{best_r10_50}")
