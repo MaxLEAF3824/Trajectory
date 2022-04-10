@@ -23,12 +23,12 @@ class Mapper:
         session = Session(self.engine)
         return session.query(Trajectory.id, Trajectory.points).all()
 
-    def get_trajectories_points_by_time_slice(self, start_time, end_time):
+    def get_trajectories_points_by_time_range(self, start_time, end_time) -> List[Trajectory]:
         session = Session(self.engine)
         return session.query(Trajectory.id, Trajectory.points).filter(
             Trajectory.start_time < end_time).filter(start_time < Trajectory.end_time).all()
 
-    def get_trajectories_embedding_by_time_slice(self, start_time, end_time):
+    def get_trajectories_embedding_by_time_range(self, start_time, end_time):
         session = Session(self.engine)
         return session.query(Trajectory.id, Trajectory.embedding).filter(
             Trajectory.start_time < end_time).filter(start_time < Trajectory.end_time).all()
@@ -37,26 +37,27 @@ class Mapper:
         session = Session(self.engine)
         return session.query(Trajectory.id, Trajectory.embedding).all()
 
-    def get_trajectory_by_id(self, traj_id):
+    def get_trajectory_by_id(self, tid: int) -> Trajectory:
         session = Session(self.engine)
-        return session.query(Trajectory).filter(Trajectory.id == traj_id).first()
+        return session.query(Trajectory).where(Trajectory.id == tid).first()
 
-    def get_trajectory_by_id_list(self, id_list):
+    def get_trajectory_by_id_list(self, id_list: List[int]) -> List[Trajectory]:
         session = Session(self.engine)
-        unsorted_trajectories = session.query(Trajectory).options(
-            load_only(Trajectory.id, Trajectory.length, Trajectory.start_time, Trajectory.end_time,
-                      Trajectory.points)).filter(Trajectory.id.in_(id_list)).all()
-        trajectories = []
-        for tid in id_list:
-            for traj in unsorted_trajectories:
-                if traj.id == tid:
-                    trajectories.append(traj)
-                    break
+        trajectories = session.query(Trajectory).filter(Trajectory.id.in_(id_list)).all()
+        trajectories.sort(key=lambda x: id_list.index(x.id))
         return trajectories
 
-    def update_trajectory_embedding_by_id(self, tid, embedding):
+    def update_trajectory_embedding_by_id(self, tid: int, embedding: str):
         session = Session(self.engine)
         session.query(Trajectory).filter(Trajectory.id == tid).update({Trajectory.embedding: embedding})
         session.commit()
         return 0
 
+    def update_trajectory_embedding_by_id_list(self, id_list: List[int], embeddings: List[str]):
+        session = Session(self.engine)
+        trajectories = session.query(Trajectory).filter(Trajectory.id.in_(id_list)).all()
+        trajectories.sort(key=lambda x: id_list.index(x.id))
+        for i, trajectory in enumerate(trajectories):
+            trajectory.embedding = embeddings[i]
+        session.commit()
+        return 0

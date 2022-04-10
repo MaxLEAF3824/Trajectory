@@ -2,6 +2,7 @@ from joblib import Parallel, delayed
 import numpy as np
 import traj_dist.distance as tdist
 from typing import List, Tuple
+import time
 from efficient_solver import EfficientSolver
 from mapper import Mapper
 from model import Trajectory
@@ -14,25 +15,29 @@ class Service:
         self.job_nums = 6  # 传统查询调用的CPU核心数
 
     def knn_query(self, query_traj: List[Tuple[float, float]], query_type: str, k: int,
-                  time_slice=None) -> (List[Trajectory], List[float]):
+                  time_range=None) -> (List[Trajectory], List[float], float):
         """
         相似性轨迹检索的总入口
         :param query_traj: List[Tuple[float, float]]:query轨迹,经纬度坐标序列
         :param query_type: str:查询类型,字符串
         :param k: int k近邻
-        :param time_slice: List[int,int]: 时间戳切片,如[0,10]表示查询与时间戳0-10有交集的轨迹
-        :return: 最相似的k个轨迹的信List[Trajectory],返回的轨迹的points已经是List[List[float,float]]
+        :param time_range: List[int,int]: 时间戳切片,如[0,10]表示查询与时间戳0-10有交集的轨迹
+        :return: tok_k_traj: 最相似的k个轨迹List[Trajectory]
+                 top_k_sim: 最相似的k个轨迹的相似度
+                 compute_time: 不含SQL操作的纯计算时间
         """
         top_k_sim = []
         top_k_id = []
         # 高效算法
         if query_type == "efficient_bf" or query_type == "efficient_faiss":
             # 根据是否考虑时间切片获取相应的轨迹列表
-            if time_slice:
-                start_time, end_time = int(time_slice[0]), int(time_slice[1])
-                traj_list = self.mapper.get_trajectories_embedding_by_time_slice(start_time, end_time)
+            if time_range:
+                start_time, end_time = int(time_range[0]), int(time_range[1])
+                traj_list = self.mapper.get_trajectories_embedding_by_time_range(start_time, end_time)
             else:
                 traj_list = self.mapper.get_all_trajectories_embedding()
+            st = time.time()
+            compute_count = len(traj_list)
             id_list = [traj[0] for traj in traj_list]
             emb_arr = np.array([(eval(traj[1])) for traj in traj_list])
             # 获取query轨迹的embedding
@@ -44,18 +49,22 @@ class Service:
                 sorted_idx = np.argsort(-sim_matrix)
                 top_k_id = [id_list[i] for i in sorted_idx[:k]]
                 top_k_sim = sim_matrix[sorted_idx[:k]].tolist()
+                compute_time = time.time() - st
             else:
                 # TODO: 用faiss查询
                 pass
+                compute_time = time.time() - st
 
         # 传统算法
         else:
             # 根据是否考虑时间切片获取相应的轨迹列表
-            if time_slice:
-                start_time, end_time = int(time_slice[0]), int(time_slice[1])
-                traj_list = self.mapper.get_trajectories_points_by_time_slice(start_time, end_time)
+            if time_range:
+                start_time, end_time = int(time_range[0]), int(time_range[1])
+                traj_list = self.mapper.get_trajectories_points_by_time_range(start_time, end_time)
             else:
                 traj_list = self.mapper.get_all_trajectories_points()
+            st = time.time()
+            compute_count = len(traj_list)
             id_list = [traj[0] for traj in traj_list]
             points_list = [np.array(eval(traj[1])) for traj in traj_list]
             qt = np.array(query_traj)
@@ -76,10 +85,9 @@ class Service:
             top_k_res = sorted(res, key=lambda x: x[1], reverse=True)[:k]
             top_k_id = [tid for tid, sim in top_k_res]
             top_k_sim = [sim for tid, sim in top_k_res]
+            compute_time = time.time() - st
         tok_k_traj = self.mapper.get_trajectory_by_id_list(top_k_id)
-        for traj in tok_k_traj:
-            traj.points = eval(traj.points)
-        return tok_k_traj, top_k_sim
+        return tok_k_traj, top_k_sim, compute_time, compute_count
 
     def generate_embedding_all(self):
         """
@@ -91,8 +99,7 @@ class Service:
         id_list = [traj[0] for traj in traj_list]
         embeddings = self.solver.embed_trajectory_batch(points_list)
         embeddings = [str(embedding.tolist()) for embedding in embeddings]
-        for i, tid in enumerate(id_list):
-            self.mapper.update_trajectory_embedding_by_id(tid, embeddings[i])
+        self.mapper.update_trajectory_embedding_by_id_list(id_list, embeddings)
 
     # TODO 向数据库中插入一批新轨迹并生成其embedding
     def insert_trajectories(self, trajectories):

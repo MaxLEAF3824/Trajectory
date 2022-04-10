@@ -210,9 +210,9 @@ class T3S(nn.Module):
                        anchor_idxs, pos_idxs, neg_idxs, sim_pos, sim_neg, sim_matrix_a):
         batch_size = anchor.size(0)
         tri_num = neg.shape[0] // batch_size
-        output_a = self.forward(anchor, trajs_a, trajs_a_lens)
-        output_p = self.forward(pos, trajs_p, trajs_p_lens)
-        # output_n = self.forward(neg, trajs_n, trajs_n_lens)
+        output_a = self.forward(anchor, trajs_a, trajs_a_lens) #bsz ,emb
+        output_p = self.forward(pos, trajs_p, trajs_p_lens) #bsz*10,emb
+        output_n = self.forward(neg, trajs_n, trajs_n_lens) #bsz*10,emb
         sim_p = torch.exp(-torch.norm(output_a.repeat(tri_num, 1) - output_p, dim=1)).reshape(batch_size, -1)
         sim_a = torch.exp(-torch.norm(output_a.unsqueeze(1)-output_a, dim=2)).reshape(batch_size, -1)
         # sim_n = torch.exp(-torch.norm(output_a.repeat(tri_num, 1) - output_n, dim=1)).reshape(batch_size, -1)

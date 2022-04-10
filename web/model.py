@@ -12,3 +12,13 @@ class Trajectory(Base):
     end_time = Column(Integer)
     points = Column(Text)
     embedding = Column(Text)
+
+    def to_json(self):
+        return {
+            'id': self.id,
+            'length': self.length,
+            'start_time': self.start_time,
+            'end_time': self.end_time,
+            'points': eval(self.points),
+            'embedding': eval(self.points)
+        }
