@@ -1,5 +1,4 @@
 import utils
-from geopy.distance import geodesic as dis
 import numpy as np
 
 
@@ -19,7 +18,6 @@ class Traj2Grid:
         p0 = (min_lat, min_lon)
         p1 = (min_lat + (max_lat - min_lat) / m, min_lon)
         p2 = (min_lat, min_lon + (max_lon - min_lon) / n)
-        self.gird_shape = (dis(p0, p1).meters, dis(p0, p2).meters)
 
     def point2grid(self, point):
         # point : (lon, lat)
