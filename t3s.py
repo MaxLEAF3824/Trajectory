@@ -179,6 +179,7 @@ class T3S(nn.Module):
         self.mean_y = None
         self.std_x = None
         self.std_x = None
+        
 
     def forward(self, x, trajs, trajs_lens):
         """
@@ -187,9 +188,9 @@ class T3S(nn.Module):
         trajs_lens: LongTensor: [batch_size]
         """
         # transformer embedding
-        seq_len = x.shape[1]
+        # seq_len = x.shape[1]
         mask_x = (x == -1)  # [batch_size, seq_len]
-        lens = seq_len - torch.sum(mask_x, dim=1)  # [batch_size]
+        # lens = seq_len - torch.sum(mask_x, dim=1)  # [batch_size]
         x = x.clamp_min(0)
         emb_x = self.embedding(x)  # emb_x: [batch_size, seq_len, dim_emb]
         pe_emb_x = self.position_encoding(emb_x)
@@ -335,8 +336,6 @@ def train_t3s(args):
         env = Visdom(port=args.visdom_port)
         pane1_name = f'train_loss_{timer.now()}'
         pane2_name = f'test_acc_{timer.now()}'
-        # pane1 = env.line(X=np.array([0]), Y=np.array([0]), opts=dict(title='train loss'))
-        # pane2 = env.line(X=np.array([0]), Y=np.array([0]), opts=dict(title='acc'))
 
     # train
     timer.tik("train")
@@ -363,6 +362,7 @@ def train_t3s(args):
                 trajs_a, trajs_a_lens, trajs_p, trajs_p_lens, trajs_n, trajs_n_lens,
                 anchor_idxs, pos_idxs, neg_idxs, sim_pos, sim_neg, sim_matrix_a)
             loss.backward()
+            # torch.nn.utils.clip_grad_norm(model.parameters(), max_norm=1)
             optimizer.step()
             timer.tok(f"epoch:{epoch} batch:{batch_idx} train loss:{loss.item()}")
             batch_count += 1
