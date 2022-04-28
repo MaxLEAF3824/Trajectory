@@ -8,18 +8,18 @@ sys.path.append('../')
 
 
 class EfficientSolver:
-    def __init__(self, model_path, device):
+    def __init__(self, model_path, device, mean_x, mean_y, std_x, std_y):
         self.model = torch.load(model_path)
         self.model.to(device)
         self.model.eval()
         self.t2g = self.model.t2g
-        self.mean_x = self.model.mean_x
-        self.mean_y = self.model.mean_y
-        self.std_x = self.model.std_x
-        self.std_y = self.model.std_y
         self.device = device
         self.max_bsz = 100
-
+        self.mean_x = mean_x
+        self.mean_y = mean_y
+        self.std_x = std_x
+        self.std_y = std_y
+    
     def normalize_traj(self, traj):
         """
         归一化轨迹

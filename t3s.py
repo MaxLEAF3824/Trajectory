@@ -1,5 +1,6 @@
 import torch
 import torch.utils.data as tud
+from torch.utils.data.sampler import Sampler
 import torch.nn.utils.rnn as rnn_utils
 from torch import nn
 import numpy as np
@@ -7,21 +8,25 @@ import json
 import math
 import utils
 import random
-from pytorch_metric_learning import losses, distances
+from pytorch_metric_learning import losses, distances, miners
+import matplotlib.pyplot as plt
+from sklearn.decomposition import PCA  # 加载PCA算法包
 timer = utils.Timer()
 
 
 class MetricLearningDataset(tud.Dataset):
-    def __init__(self, file_train, triplet_num, min_len, max_len, dataset_size=None):
+    def __init__(self, file_train, triplet_num, min_len, max_len, dataset_size=None, neg_rate=10):
         self.triplet_num = triplet_num
         self.min_len = min_len
         self.max_len = max_len
         self.dataset_size = dataset_size
+        self.neg_rate = neg_rate
         self.trajs = None
         self.original_trajs = None
         self.dis_matrix = None
         self.sorted_index = None
         self.sim_matrix = None
+        self.loss_map = None
         self.data_prepare(json.load(open(file_train)))
 
     def data_prepare(self, train_dict):
@@ -58,6 +63,10 @@ class MetricLearningDataset(tud.Dataset):
         self.sorted_index = np.argsort(self.dis_matrix, axis=1)
         a = 20
         self.sim_matrix = np.exp(-a * self.dis_matrix)
+        self.loss_map = torch.zeros(self.dataset_size, self.dataset_size)
+        for i in range(self.dataset_size):
+            self.loss_map[i, i] = -1
+            # self.loss_map[i, self.sorted_index[i, :self.triplet_num]] = 0
 
     def __len__(self):
         return self.dataset_size
@@ -70,9 +79,11 @@ class MetricLearningDataset(tud.Dataset):
         else:
             positive_idx = positive_idx[:self.triplet_num]
         positive = self.trajs[positive_idx]
-        negative_idx = self.sorted_index[idx][-self.triplet_num:].tolist()
+        negative_idx = self.sorted_index[idx][-self.triplet_num*self.neg_rate:].tolist()
         list.reverse(negative_idx)
-        negative_idx = np.random.choice(self.sorted_index[idx][self.triplet_num:], self.triplet_num).tolist()
+        negative_idx = np.random.choice(
+            self.sorted_index[idx][self.triplet_num:],
+            self.triplet_num * self.neg_rate).tolist()
         negative = self.trajs[negative_idx]
         trajs_a = self.original_trajs[idx]
         trajs_p = self.original_trajs[positive_idx]
@@ -139,6 +150,57 @@ def collate_fn(train_data):
         anchor_idxs, pos_idxs, neg_idxs, sim_pos, sim_neg, sim_matrix_a
 
 
+class SeqHardSampler(Sampler):
+    def __init__(self, data, batch_size):
+        self.data = data
+        self.batch_size = batch_size
+
+    def __iter__(self):
+        indices = []
+        loss_map_copy = self.data.loss_map.clone()
+        start_seq = [i for i in range(loss_map_copy.shape[0])]
+        random.shuffle(start_seq)
+        while start_seq:
+            idx = start_seq.pop()
+            indices.append(idx)
+            if len(start_seq) < self.batch_size:
+                indices.extend(start_seq)
+                start_seq.clear()
+                break
+            losses, indexs = torch.topk(loss_map_copy[idx], k=self.batch_size-1, dim=0)
+            loss_map_copy[:, indexs] = -1
+            loss_map_copy[:, idx] = -1
+            for index in indexs:
+                start_seq.remove(index)
+            indices.extend(indexs.tolist())
+        indices = torch.LongTensor(indices)
+        return iter(indices)
+
+    def __len__(self):
+        return len(self.data)
+
+
+class GlobalHardSampler(Sampler):
+    def __init__(self, data, batch_size):
+        self.data = data
+        self.batch_size = batch_size
+
+    def __iter__(self):
+        indices = []
+        datasize = self.data.dataset_size
+        batch_num = math.ceil(datasize / self.batch_size)
+        for i in range(batch_num):
+            indices.append([])
+        loss_map_copy = self.data.loss_map.clone()
+        for i in range(datasize):
+            torch.max(loss_map_copy)
+        indices = torch.cat(indices, dim=0)
+        return iter(indices)
+
+    def __len__(self):
+        return len(self.data)
+
+
 class PositionalEncoding(nn.Module):
     def __init__(self, emb_size, dropout=0.0, pe_max_len=5000):
         super(PositionalEncoding, self).__init__()
@@ -174,12 +236,13 @@ class T3S(nn.Module):
         self.encoder = nn.TransformerEncoder(nn.TransformerEncoderLayer(
             emb_size, heads, batch_first=True), encoder_layers)
         self.lstm = nn.LSTM(2, emb_size, lstm_layers, batch_first=True)
+        self.aphla = nn.Parameter(torch.FloatTensor(1), requires_grad=True)  # alpha
+        nn.init.constant_(self.aphla, 1)
         self.t2g = t2g
         self.mean_x = None
         self.mean_y = None
         self.std_x = None
         self.std_x = None
-        
 
     def forward(self, x, trajs, trajs_lens):
         """
@@ -193,41 +256,90 @@ class T3S(nn.Module):
         # lens = seq_len - torch.sum(mask_x, dim=1)  # [batch_size]
         x = x.clamp_min(0)
         emb_x = self.embedding(x)  # emb_x: [batch_size, seq_len, dim_emb]
-        pe_emb_x = self.position_encoding(emb_x)
+        emb_x = self.position_encoding(emb_x)
         # pe_emb_x[mask_x] = 0
-        encoder_out = self.encoder(pe_emb_x, src_key_padding_mask=mask_x)  # [batch_size, seq_len, dim_emb]
+        encoder_out = self.encoder(emb_x, src_key_padding_mask=mask_x)  # [batch_size, seq_len, dim_emb]
         # encoder_out[mask_x] = 0
         # encoder_out_mean = encoder_out.sum(dim=1) / lens.unsqueeze(1)  # [batch_size, dim_emb]
-        encoder_out_mean = torch.mean(encoder_out, 1)  # batch_size, dim_emb]
+        encoder_out = torch.mean(encoder_out, 1)  # batch_size, dim_emb]
         # lstm embedding
         trajs = rnn_utils.pack_padded_sequence(trajs, trajs_lens, batch_first=True, enforce_sorted=False)
         lstm_out, (h_n, c_n) = self.lstm(trajs)
         # add
-        output = self.lamb * encoder_out_mean + (1 - self.lamb) * h_n.squeeze()  # output: [batch_size, dim_emb]
+        output = self.lamb * encoder_out + (1 - self.lamb) * h_n.squeeze()  # output: [batch_size, dim_emb]
         return output
 
-    def calculate_loss(self, anchor, anchor_lens, pos, pos_lens, neg, neg_lens,
-                       trajs_a, trajs_a_lens, trajs_p, trajs_p_lens, trajs_n, trajs_n_lens,
-                       anchor_idxs, pos_idxs, neg_idxs, sim_pos, sim_neg, sim_matrix_a):
+    def calculate_loss_vanilla(self, anchor, anchor_lens, pos, pos_lens, neg, neg_lens,
+                               trajs_a, trajs_a_lens, trajs_p, trajs_p_lens, trajs_n, trajs_n_lens,
+                               anchor_idxs, pos_idxs, neg_idxs, sim_pos, sim_neg, sim_matrix_a, *args):
         batch_size = anchor.size(0)
-        tri_num = neg.shape[0] // batch_size
+        pos_num = pos.shape[0] // batch_size
+        device = anchor.device
         output_a = self.forward(anchor, trajs_a, trajs_a_lens)
         output_p = self.forward(pos, trajs_p, trajs_p_lens)
-        # output_n = self.forward(neg, trajs_n, trajs_n_lens)
-        sim_p = torch.exp(-torch.norm(output_a.repeat(tri_num, 1) - output_p, dim=1)).reshape(batch_size, -1)
-        sim_a = torch.exp(-torch.norm(output_a.unsqueeze(1)-output_a, dim=2)).reshape(batch_size, -1)
-        # sim_n = torch.exp(-torch.norm(output_a.repeat(tri_num, 1) - output_n, dim=1)).reshape(batch_size, -1)
-        w_p = torch.softmax(torch.ones(tri_num)/torch.arange(1, tri_num+1).float(), dim=0).to(output_a.device)
+        sim_p = torch.exp(-self.aphla * torch.norm(output_a.repeat(pos_num,
+                          1) - output_p, dim=1)).reshape(batch_size, -1)
+        sim_a = torch.exp(-self.aphla * torch.norm(output_a.unsqueeze(1)-output_a, dim=2)).reshape(batch_size, -1)
+        w_p = torch.softmax(torch.ones(pos_num)/torch.arange(1, pos_num+1).float(), dim=0).to(device)
         loss_p = torch.sum(w_p * (sim_p - sim_pos)**2, dim=1)
         loss_n = torch.sum((torch.relu(sim_a - sim_matrix_a))**2, dim=1)
         loss = (loss_p + loss_n).mean()
+        return loss, loss_p.mean(), loss_n.mean()
+
+    def calculate_loss_vanilla_v2(self, anchor, anchor_lens, pos, pos_lens, neg, neg_lens,
+                                  trajs_a, trajs_a_lens, trajs_p, trajs_p_lens, trajs_n, trajs_n_lens,
+                                  anchor_idxs, pos_idxs, neg_idxs, sim_pos, sim_neg, sim_matrix_a):
+        batch_size = anchor.size(0)
+        pos_num = pos.shape[0] // batch_size
+        neg_num = neg.shape[0] // batch_size
+        device = anchor.device
+        output_a = self.forward(anchor, trajs_a, trajs_a_lens)
+        output_p = self.forward(pos, trajs_p, trajs_p_lens)
+        sim_p = torch.exp(-self.aphla * torch.norm(output_a.repeat(pos_num,
+                          1) - output_p, dim=1)).reshape(batch_size, -1)
+        output_n = self.forward(neg, trajs_n, trajs_n_lens)
+        sim_n = torch.exp(-self.aphla * torch.norm(output_a.repeat(neg_num,
+                          1) - output_n, dim=1)).reshape(batch_size, -1)
+        w_p = torch.softmax(torch.ones(pos_num)/torch.arange(1, pos_num+1).float(), dim=0).to(device)
+        w_n = torch.softmax(torch.ones(neg_num).float(), dim=0).to(device)
+        loss_p = torch.sum(w_p * (sim_p - sim_pos)**2, dim=1)
+        loss_n = torch.sum(w_n * (torch.relu(sim_n - sim_neg))**2, dim=1)
+        loss = (loss_p + loss_n).mean()
         return loss
+
+    def calculate_loss_seq_sampler(self, anchor, anchor_lens, pos, pos_lens, neg, neg_lens,
+                                   trajs_a, trajs_a_lens, trajs_p, trajs_p_lens, trajs_n, trajs_n_lens,
+                                   anchor_idxs, pos_idxs, neg_idxs, sim_pos, sim_neg, sim_matrix_a, loss_map):
+        batch_size = anchor.size(0)
+        pos_num = pos.shape[0] // batch_size
+        device = anchor.device
+        output_a = self.forward(anchor, trajs_a, trajs_a_lens)
+        output_p = self.forward(pos, trajs_p, trajs_p_lens)
+        sim_p = torch.exp(-self.aphla * torch.norm(output_a.repeat(pos_num,
+                          1) - output_p, dim=1)).reshape(batch_size, -1)
+        sim_a = torch.exp(-self.aphla * torch.norm(output_a.unsqueeze(1)-output_a, dim=2)).reshape(batch_size, -1)
+        w_p = torch.softmax(torch.ones(pos_num)/torch.arange(1, pos_num+1).float(), dim=0).to(device)
+        loss_p = torch.sum(w_p * (sim_p - sim_pos)**2, dim=1)
+        loss_n = torch.relu(sim_a - sim_matrix_a)
+        loss_n_copy = loss_n.detach().cpu()
+        idxs_diag = torch.arange(0,batch_size)
+        loss_n_copy[idxs_diag,idxs_diag] = -1
+        mask = loss_map[anchor_idxs]
+        mask[:,anchor_idxs] = loss_n_copy
+        loss_map[anchor_idxs] = mask
+        loss_n = torch.sum(loss_n, dim=1)
+        loss = loss_p.mean() + loss_n.mean()
+        return loss, loss_p.mean(), loss_n.mean()
+
+    def calculate_loss_hard_miner(self):
+        pass
 
     def evaluate(self, test_loader, device, tri_num):
         self.eval()
         ranks = []
         hit_ratios_10 = []
         ratios10_50 = []
+        pca_x = []
         with torch.no_grad():
             for (anchor, anchor_lens, pos, pos_lens, neg, neg_lens,
                  trajs_a, trajs_a_lens, trajs_p, trajs_p_lens, trajs_n, trajs_n_lens,
@@ -239,7 +351,9 @@ class T3S(nn.Module):
                 tb_trajs_a_lens = trajs_a_lens[:test_num]
                 tb_pos_idxs = pos_idxs[:test_num*tri_num].reshape(test_num, tri_num).cpu().numpy()
                 output_a = self.forward(tb_anchor, tb_trajs_a, tb_trajs_a_lens)
-                bsz = 200
+                # pca = PCA(n_components=2)  # 加载PCA算法，设置降维后主成分数目为2
+                # pca_x = pca.fit_transform(output_a.cpu().numpy())  # 对样本进行降维
+                bsz = 300
                 sim_matrixs = []
                 for i in range(len(anchor)//bsz+1):
                     lb = i * bsz
@@ -249,7 +363,7 @@ class T3S(nn.Module):
                     sim_matrixs.append(s)
                 sim_matrix = torch.cat(sim_matrixs, dim=1).cpu().numpy()
                 sorted_index = np.argsort(-sim_matrix, axis=1)
-                sorted_index = sorted_index[:,1:]
+                sorted_index = sorted_index[:, 1:]
                 for i in range(test_num):
                     avg_rank = 0
                     for idx in tb_pos_idxs[i]:
@@ -261,128 +375,9 @@ class T3S(nn.Module):
                     hit_ratios_10.append(hr_10)
                     ratios10_50.append(r10_50)
                 break
+        
         rank = np.mean(ranks)
         hr_10 = np.mean(hit_ratios_10)
         r10_50 = np.mean(ratios10_50)
         self.train()
-        return rank, hr_10, r10_50
-
-
-def train_t3s(args):
-
-    # load args
-    train_dataset = args.train_dataset
-    validate_dataset = args.validate_dataset
-    batch_size = args.batch_size
-    pretrained_embedding_file = args.pretrained_embedding
-    emb_size = args.embedding_size
-    learning_rate = args.learning_rate
-    epochs = args.epoch_num
-    cp = args.checkpoint
-    vocab_size = args.vocab_size
-    triplet_num = args.triplet_num
-    dataset_size = args.dataset_size
-    lstm_layers = args.lstm_layers
-    encoder_layers = args.encoder_layers
-    min_len = args.min_len
-    max_len = args.max_len
-    heads = args.heads
-    device = torch.device(args.device)
-    vp = args.visdom_port
-
-    # prepare data
-    timer.tik("prepare data")
-    dataset = MetricLearningDataset(train_dataset, triplet_num, min_len, max_len, dataset_size)
-    train_loader = tud.DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
-    test_dataset = MetricLearningDataset(validate_dataset, triplet_num, min_len=0 ,max_len=99999, dataset_size=None)
-    test_loader = tud.DataLoader(test_dataset, batch_size=len(test_dataset), collate_fn=collate_fn)
-    timer.tok("prepare data")
-
-    # init t2g
-    from traj2grid import Traj2Grid
-    from parameters import min_lon, max_lon, min_lat, max_lat
-    str_grid2idx = json.load(open("data/str_grid2idx_400_44612.json"))
-    grid2idx = {eval(g): str_grid2idx[g] for g in list(str_grid2idx)}
-    t2g = Traj2Grid(400, 400, min_lon, min_lat, max_lon, max_lat, grid2idx)
-    
-    # init model
-    timer.tik("init model")
-    pre_emb = None
-    if pretrained_embedding_file:
-        pre_emb = torch.FloatTensor(np.load(pretrained_embedding_file))
-    model = T3S(vocab_size, emb_size, heads, pre_emb=pre_emb, lstm_layers=lstm_layers, encoder_layers=encoder_layers, t2g=t2g).to(device)
-    model.mean_x = dataset.meanx
-    model.mean_y = dataset.meany
-    model.std_x = dataset.stdx
-    model.std_x = dataset.stdy
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    model.train()
-    epoch_start = 0
-    timer.tok("init model")
-
-    # load checkpoint
-    if cp is not None:
-        cp = torch.load(cp)
-        if cp.get('model'):
-            model.load_state_dict(cp['model'])
-        if cp.get('optimizer'):
-            optimizer.load_state_dict(cp['optimizer'])
-        if cp.get('epoch'):
-            epoch_start = cp['epoch'] + 1
-
-    # init visdom
-    if vp != 0:
-        from visdom import Visdom
-        env = Visdom(port=args.visdom_port)
-        pane1_name = f'train_loss_{timer.now()}'
-        pane2_name = f'test_acc_{timer.now()}'
-
-    # train
-    timer.tik("train")
-    batch_count = 0
-    best_rank = 99999
-    best_hr10 = 0
-    best_r10_50 = 0
-    for epoch in range(epoch_start, epochs):
-        for batch_idx, (anchor, anchor_lens, pos, pos_lens, neg, neg_lens,
-                        trajs_a, trajs_a_lens, trajs_p, trajs_p_lens, trajs_n, trajs_n_lens,
-                        anchor_idxs, pos_idxs, neg_idxs, sim_pos, sim_neg, sim_matrix_a) in enumerate(train_loader):
-            anchor = anchor.to(device)
-            pos = pos.to(device)
-            trajs_a = trajs_a.to(device)
-            trajs_p = trajs_p.to(device)
-            sim_pos = sim_pos.to(device)
-            sim_matrix_a = sim_matrix_a.to(device)
-            # neg = neg.to(device)
-            # trajs_n = trajs_n.to(device)
-            # sim_neg = sim_neg.to(device)
-            optimizer.zero_grad()
-            loss = model.calculate_loss(
-                anchor, anchor_lens, pos, pos_lens, neg, neg_lens,
-                trajs_a, trajs_a_lens, trajs_p, trajs_p_lens, trajs_n, trajs_n_lens,
-                anchor_idxs, pos_idxs, neg_idxs, sim_pos, sim_neg, sim_matrix_a)
-            loss.backward()
-            # torch.nn.utils.clip_grad_norm(model.parameters(), max_norm=1)
-            optimizer.step()
-            timer.tok(f"epoch:{epoch} batch:{batch_idx} train loss:{loss.item()}")
-            batch_count += 1
-            if vp != 0:
-                env.line(X=[batch_count], Y=[loss.item()], win=pane1_name, name="train loss", update='append')
-        rank, hr_10, r10_50 = model.evaluate(test_loader, device, tri_num=triplet_num)
-        if vp != 0:
-            env.line(X=[epoch], Y=[rank], win=pane2_name, name="Rank", update='append')
-            env.line(X=[epoch], Y=[hr_10], win=pane2_name, name="HR10",update='append')
-            env.line(X=[epoch], Y=[r10_50], win=pane2_name, name="R10@50",update='append')
-        timer.tok(f"epoch:{epoch} rank:{rank:.4f}, hr_10:{hr_10:.4f}, r10_50:{r10_50:.4f}")
-        if epoch % 10 == 9:
-            cp = {'model': model.state_dict(), 'optihmizer': optimizer.state_dict(), 'epoch': epoch}
-            torch.save(cp, f'model/cp_{epoch}_loss{round(float(loss), 3)}_rank_{round(float(rank), 3)}.pth')
-        if rank < best_rank:
-            best_rank = rank
-            best_hr10 = hr_10
-            best_r10_50 = r10_50
-            model.to("cpu")
-            torch.save(model, f'model/best_model.pth')
-            model.to(device)
-            timer.tok(f"save new best rank:{best_rank}")
-    print(f"train finish. best rank:{best_rank} best hr10:{best_hr10} best r10@50:{best_r10_50}")
+        return rank, hr_10, r10_50, pca_x
