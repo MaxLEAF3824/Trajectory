@@ -11,8 +11,25 @@ from model import Trajectory
 class Service:
     def __init__(self):
         self.mapper = Mapper()
-        self.solver = EfficientSolver('../model/archived_model/model_baseline_rank_12.034.pth', device="cuda")
+        mean_x, mean_y, std_x, std_y = self._get_mean_std()
+        self.solver = EfficientSolver('../model/archived_model/model_baseline_rank_12.034.pth', "cuda", mean_x, mean_y,
+                                      std_x, std_y)
         self.job_nums = 6  # 传统查询调用的CPU核心数
+
+    def _get_mean_std(self):
+        """
+        从数据库中获取轨迹的均值和标准差
+        """
+        mean_x, mean_y, std_x, std_y = 0, 0, 0, 0
+        traj_list = self.mapper.get_all_trajectories_points()
+        points_list = []
+        for _, points in traj_list:
+            points_list.extend(eval(points))
+        mean_x = np.mean([point[0] for point in points_list])
+        mean_y = np.mean([point[1] for point in points_list])
+        std_x = np.std([point[0] for point in points_list])
+        std_y = np.std([point[1] for point in points_list])
+        return mean_x, mean_y, std_x, std_y
 
     def knn_query(self, query_traj: List[Tuple[float, float]], query_type: str, k: int,
                   time_range=None) -> (List[Trajectory], List[float], float):

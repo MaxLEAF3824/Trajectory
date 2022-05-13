@@ -71,6 +71,14 @@ class UnitTest(unittest.TestCase):
         res = self.service.mapper.get_all_trajectories_embedding()
         print(res)
 
+    def test_get_all_trajectories_points(self):
+        res = self.service.mapper.get_all_trajectories_points()
+        print(res)
+
+    def test__get_mean_std(self):
+        res = self.service.mapper._get_mean_std()
+        print(res)
+
     def test_get_trajectory_by_id_list(self):
         res = self.service.mapper.get_trajectory_by_id_list([4, 2, 1, 3])
 
