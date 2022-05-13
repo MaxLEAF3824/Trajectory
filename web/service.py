@@ -32,7 +32,7 @@ class Service:
         return mean_x, mean_y, std_x, std_y
 
     def knn_query(self, query_traj: List[Tuple[float, float]], query_type: str, k: int,
-                  time_range=None) -> (List[Trajectory], List[float], float):
+                  time_range=None) -> Tuple[List[Trajectory], List[float], float]:
         """
         相似性轨迹检索的总入口
         :param query_traj: List[Tuple[float, float]]:query轨迹,经纬度坐标序列
