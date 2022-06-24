@@ -12,7 +12,7 @@ class Service:
     def __init__(self):
         self.mapper = Mapper()
         mean_x, mean_y, std_x, std_y = self._get_mean_std()
-        self.solver = EfficientSolver('../model/archived_model/model_baseline_rank_12.034.pth', "cuda", mean_x, mean_y,
+        self.solver = EfficientSolver('../model/model_baseline_rank_12.034.pth', "cuda", mean_x, mean_y,
                                       std_x, std_y)
         self.job_nums = 6  # 传统查询调用的CPU核心数
 
